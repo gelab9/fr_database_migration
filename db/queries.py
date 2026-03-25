@@ -96,6 +96,32 @@ def fetch_report_by_id(index: int):
 
 
 # ---------------------------------------------------------------------------
+# Fetch a single report by New ID (all 70 columns)
+# ---------------------------------------------------------------------------
+
+def fetch_report_by_new_id(new_id: int):
+    """
+    Return a single report dict (all columns) for the given [New ID] value,
+    or None if not found.
+    """
+    sql = "SELECT * FROM [Failure Report] WHERE [New ID] = ?"
+
+    conn = get_connection()
+    if conn is None:
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (new_id,))
+        row = cursor.fetchone()
+        return _row_to_dict(cursor, row) if row else None
+    except pyodbc.Error as e:
+        print(f"fetch_report_by_new_id error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Search / filter reports
 # ---------------------------------------------------------------------------
 
@@ -157,9 +183,13 @@ def search_reports(
         conditions.append("[Assigned To] = ?")
         params.append(assigned_to)
 
+    # [FR_Approved] is nvarchar(255). Distinct values found across 2003 records:
+    #   'Checked'   -> 1917 rows  (approved)
+    #   'Unchecked' ->   84 rows  (not approved)
+    #   NULL        ->    2 rows  (no value set)
     if approved is not None:
         conditions.append("[FR_Approved] = ?")
-        params.append(1 if approved else 0)
+        params.append("Checked" if approved else "Unchecked")
 
     if date_failed_from is not None:
         conditions.append("[Date Failed] >= ?")
