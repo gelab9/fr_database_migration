@@ -151,7 +151,8 @@ class DashboardWindow(QMainWindow):
         Emitted with the [Index] value when the user double-clicks a row.
     """
 
-    report_selected = pyqtSignal(int)
+    report_selected     = pyqtSignal(int)
+    new_report_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -227,6 +228,12 @@ class DashboardWindow(QMainWindow):
         self._approved_combo.setMinimumWidth(110)
         self._approved_combo.currentIndexChanged.connect(self._schedule_search)
         filter_bar.addWidget(self._approved_combo)
+
+        # New Report button
+        self._new_report_btn = QPushButton("+ New Report")
+        self._new_report_btn.setFixedWidth(100)
+        self._new_report_btn.clicked.connect(self.new_report_requested.emit)
+        filter_bar.addWidget(self._new_report_btn)
 
         # Refresh button
         self._refresh_btn = QPushButton("Refresh")
@@ -358,8 +365,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     win = DashboardWindow()
-    win.report_selected.connect(
-        lambda idx: print(f"Report selected — Index: {idx}")
-    )
+    from ui.detail_view import open_detail
+    win.report_selected.connect(lambda idx: open_detail(idx, parent=win))
     win.show()
     sys.exit(app.exec())

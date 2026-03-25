@@ -306,3 +306,68 @@ def update_report(index: int, fields: dict):
         return False
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Next available [New ID]
+# ---------------------------------------------------------------------------
+
+def get_next_new_id() -> int:
+    """
+    Return MAX([New ID]) + 1 from [Failure Report].
+
+    [New ID] is a required non-nullable int that is NOT an identity column,
+    so every INSERT must supply it explicitly.  This function derives the
+    next safe value by incrementing the current maximum.
+
+    Raises RuntimeError if the table is empty or the connection fails,
+    since inserting without a valid [New ID] would violate the NOT NULL
+    constraint.
+    """
+    sql = "SELECT MAX([New ID]) FROM [Failure Report]"
+
+    conn = get_connection()
+    if conn is None:
+        raise RuntimeError("get_next_new_id: could not connect to database.")
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        row = cursor.fetchone()
+        if row is None or row[0] is None:
+            raise RuntimeError("get_next_new_id: MAX([New ID]) returned NULL — table may be empty.")
+        return int(row[0]) + 1
+    except pyodbc.Error as e:
+        raise RuntimeError(f"get_next_new_id error: {e}") from e
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Fetch attachment metadata for a report (by New ID)
+# ---------------------------------------------------------------------------
+
+def fetch_attachments_by_new_id(new_id: int) -> list[dict]:
+    """
+    Return attachment metadata rows from the ATTACHMENT table for the given
+    [New ID].  The binary ATTACHMENT column is intentionally excluded — it
+    can be large and is not suitable for display in a form.
+
+    The ATTACHMENT table schema:
+        ID          int         (PK)
+        FR_ID       int         (FK → [Failure Report].[New ID])
+        ATTACHMENT  varbinary   (file content — excluded here)
+    """
+    sql = "SELECT [ID], [FR_ID] FROM [ATTACHMENT] WHERE [FR_ID] = ?"
+
+    conn = get_connection()
+    if conn is None:
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (new_id,))
+        return _rows_to_dicts(cursor, cursor.fetchall())
+    except pyodbc.Error as e:
+        print(f"fetch_attachments_by_new_id error: {e}")
+        return []
+    finally:
+        conn.close()
