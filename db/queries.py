@@ -240,10 +240,9 @@ def create_report(fields: dict):
 
     bracketed_cols = ", ".join(f"[{col}]" for col in fields)
     placeholders = ", ".join("?" for _ in fields)
-    sql = (
+    insert_sql = (
         f"INSERT INTO [Failure Report] ({bracketed_cols}) "
-        f"VALUES ({placeholders}); "
-        f"SELECT SCOPE_IDENTITY();"
+        f"VALUES ({placeholders})"
     )
 
     conn = get_connection()
@@ -251,9 +250,32 @@ def create_report(fields: dict):
         return None
     try:
         cursor = conn.cursor()
-        cursor.execute(sql, list(fields.values()))
+
+        # pyodbc raises 'No results. Previous SQL was not a query.' when
+        # INSERT and SELECT SCOPE_IDENTITY() are sent as a single string via
+        # cursor.execute(), because pyodbc does not advance through multiple
+        # result sets the same way SQL Server Management Studio does.
+        # Fix: run the INSERT alone first, then fetch the identity on a
+        # separate execute() call before committing, so the cursor is still
+        # on the same open transaction and SCOPE_IDENTITY() is valid.
+        cursor.execute(insert_sql, list(fields.values()))
+
+        cursor.execute("SELECT SCOPE_IDENTITY()")
         row = cursor.fetchone()
         new_index = int(row[0]) if row and row[0] is not None else None
+
+        if new_index is None:
+            # SCOPE_IDENTITY() returns NULL when the driver resets scope context
+            # between statements (observed on this SQL Server setup). Fall back to
+            # @@IDENTITY, which is connection-scoped and always reflects the last
+            # insert on this connection. Keep a try/except as a final safety net.
+            try:
+                cursor.execute("SELECT @@IDENTITY")
+                row = cursor.fetchone()
+                new_index = int(row[0]) if row and row[0] is not None else None
+            except pyodbc.Error as id_err:
+                print(f"create_report: @@IDENTITY fallback failed: {id_err}")
+
         conn.commit()
         return new_index
     except pyodbc.Error as e:
