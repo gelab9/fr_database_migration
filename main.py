@@ -17,10 +17,14 @@ def main():
     app.setStyle("Fusion")
     win = DashboardWindow()
 
-    # open_detail wires save_requested → update_report internally
-    win.report_selected.connect(lambda idx: open_detail(idx, parent=win))
+    # open_detail wires save_requested → update_report internally.
+    # Pass on_deleted so the dashboard refreshes if a report is deleted
+    # from within the detail view.
+    win.report_selected.connect(
+        lambda idx: open_detail(idx, parent=win, on_deleted=win._load_all)
+    )
 
-    # After new report dialog closes, refresh the table so the new row appears
+    # After new report dialog closes (Accepted), refresh the table.
     def _on_new_report():
         dlg = open_new_report(parent=win)
         if dlg.result() == dlg.DialogCode.Accepted:

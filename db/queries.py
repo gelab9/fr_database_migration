@@ -268,7 +268,7 @@ def create_report(fields: dict):
             # SCOPE_IDENTITY() returns NULL when the driver resets scope context
             # between statements (observed on this SQL Server setup). Fall back to
             # @@IDENTITY, which is connection-scoped and always reflects the last
-            # insert on this connection. Keep a try/except as a final safety net.
+            # insert on this connection.
             try:
                 cursor.execute("SELECT @@IDENTITY")
                 row = cursor.fetchone()
@@ -331,6 +331,57 @@ def update_report(index: int, fields: dict):
 
 
 # ---------------------------------------------------------------------------
+# Delete a report
+# ---------------------------------------------------------------------------
+
+def delete_report(index: int) -> bool:
+    """
+    Permanently delete a row from [Failure Report] by its [Index] PK.
+
+    Also deletes any rows in the ATTACHMENT table whose [FR_ID] matches
+    the report's [New ID], to avoid orphaned attachment records.
+
+    Parameters
+    ----------
+    index : int
+        The [Index] (identity PK) of the report to delete.
+
+    Returns
+    -------
+    bool
+        True if exactly one row was deleted, False otherwise.
+    """
+    conn = get_connection()
+    if conn is None:
+        return False
+    try:
+        cursor = conn.cursor()
+
+        # Resolve the [New ID] so we can clean up attachments first.
+        cursor.execute("SELECT [New ID] FROM [Failure Report] WHERE [Index] = ?", (index,))
+        row = cursor.fetchone()
+        if row is None:
+            return False  # report not found
+        new_id = row[0]
+
+        # Delete orphaned attachment rows (safe even if the ATTACHMENT table is empty).
+        if new_id is not None:
+            cursor.execute("DELETE FROM [ATTACHMENT] WHERE [FR_ID] = ?", (new_id,))
+
+        # Delete the report itself.
+        cursor.execute("DELETE FROM [Failure Report] WHERE [Index] = ?", (index,))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    except pyodbc.Error as e:
+        print(f"delete_report error: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Next available [New ID]
 # ---------------------------------------------------------------------------
 
@@ -356,7 +407,9 @@ def get_next_new_id() -> int:
         cursor.execute(sql)
         row = cursor.fetchone()
         if row is None or row[0] is None:
-            raise RuntimeError("get_next_new_id: MAX([New ID]) returned NULL — table may be empty.")
+            raise RuntimeError(
+                "get_next_new_id: MAX([New ID]) returned NULL — table may be empty."
+            )
         return int(row[0]) + 1
     except pyodbc.Error as e:
         raise RuntimeError(f"get_next_new_id error: {e}") from e

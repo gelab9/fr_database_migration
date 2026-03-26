@@ -4,10 +4,20 @@ New Report dialog — blank editable form for creating a new failure report.
 Reuses field definitions and layout patterns from detail_view.py.
 On Save, collects all field values and calls create_report() from db.queries.
 [Index] is an identity column and is never included in the submitted dict.
+
+Day 3 notes
+-----------
+Tab labels "Test & Failure" and "Review & Approval" are set as string
+literals here (not derived from any variable), so .pyc caching cannot
+cause them to revert to underscored names.  If you still see underscores
+after pulling this file, delete __pycache__/ and ui/__pycache__/ and
+restart the application.
+
+Keyboard shortcuts added: Ctrl+S saves, Escape cancels.
 """
 
 from PyQt6.QtCore import QDate, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeySequence
 from PyQt6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -60,8 +70,8 @@ METER_TYPE_OPTIONS = [
 # DB keys → list of combo options (empty string = unset / blank)
 COMBO_OPTIONS: dict[str, list[str]] = {
     "EUT_TYPE":   EUT_TYPE_OPTIONS,
-    "Test_Type":  TEST_TYPE_OPTIONS,
-    "Meter_Type": METER_TYPE_OPTIONS,
+    "Test Type":  TEST_TYPE_OPTIONS,
+    "Meter Type": METER_TYPE_OPTIONS,
 }
 
 # DB keys that render as a NullableDateEdit
@@ -94,27 +104,40 @@ class NullableDateEdit(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        self._edit = QDateEdit()
-        self._edit.setCalendarPopup(True)
-        self._edit.setDisplayFormat("yyyy-MM-dd")
-        self._edit.setMinimumDate(self._NULL_DATE)
-        self._edit.setDate(self._NULL_DATE)
-        self._edit.setSpecialValueText("(none)")
-        layout.addWidget(self._edit, stretch=1)
+        self._date_edit = QDateEdit()
+        self._date_edit.setCalendarPopup(True)
+        self._date_edit.setDisplayFormat("yyyy-MM-dd")
+        self._date_edit.setMinimumDate(self._NULL_DATE)
+        self._date_edit.setSpecialValueText("(none)")
+        self._date_edit.setDate(self._NULL_DATE)   # start blank
+        layout.addWidget(self._date_edit, stretch=1)
 
-        clear_btn = QPushButton("✕")
-        clear_btn.setFixedWidth(24)
-        clear_btn.setToolTip("Clear date")
-        clear_btn.clicked.connect(self._clear)
-        layout.addWidget(clear_btn)
+        self._clear_btn = QPushButton("✕")
+        self._clear_btn.setFixedWidth(26)
+        self._clear_btn.setToolTip("Clear date")
+        self._clear_btn.clicked.connect(self._clear)
+        layout.addWidget(self._clear_btn)
 
     def _clear(self):
-        self._edit.setDate(self._NULL_DATE)
+        self._date_edit.setDate(self._NULL_DATE)
 
-    def get_value(self) -> str | None:
-        """Return ISO date string, or None if cleared."""
-        d = self._edit.date()
-        return None if d == self._NULL_DATE else d.toString("yyyy-MM-dd")
+    def get_value(self):
+        """Return the selected date as 'YYYY-MM-DD', or None if blank."""
+        d = self._date_edit.date()
+        if d == self._NULL_DATE:
+            return None
+        return d.toString("yyyy-MM-dd")
+
+    def set_value(self, value):
+        """Set the date from a 'YYYY-MM-DD' string or None."""
+        if value is None:
+            self._clear()
+            return
+        d = QDate.fromString(str(value)[:10], "yyyy-MM-dd")
+        if d.isValid():
+            self._date_edit.setDate(d)
+        else:
+            self._clear()
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +146,7 @@ class NullableDateEdit(QWidget):
 
 class NewReportDialog(QDialog):
     """
-    Blank editable form for entering a new failure report.
+    Blank editable form for creating a new failure report.
 
     All fields start editable. Save calls create_report(); on success a
     confirmation box is shown with the assigned FR Index and the dialog closes.
@@ -131,11 +154,8 @@ class NewReportDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Maps db key → QWidget (QLineEdit / QTextEdit / QComboBox / NullableDateEdit)
         self._field_widgets: dict[str, QWidget] = {}
 
-        # Fetch next [New ID] up front — it is required, non-nullable, and not
-        # an identity column, so every INSERT must supply it explicitly.
         try:
             self._next_new_id: int = get_next_new_id()
         except RuntimeError as e:
@@ -172,8 +192,14 @@ class NewReportDialog(QDialog):
         title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         header_row.addWidget(title)
 
+        new_id_label = QLabel(f"New ID: {self._next_new_id}")
+        new_id_label.setStyleSheet("color: #555; font-size: 10pt;")
+        header_row.addWidget(new_id_label)
+
         self._save_btn = QPushButton("Save")
         self._save_btn.setFixedWidth(70)
+        self._save_btn.setShortcut(QKeySequence("Ctrl+S"))
+        self._save_btn.setToolTip("Save this report  (Ctrl+S)")
         self._save_btn.clicked.connect(self._on_save_clicked)
         header_row.addWidget(self._save_btn)
 
@@ -191,13 +217,15 @@ class NewReportDialog(QDialog):
         root.addWidget(sep)
 
         # ── Tabs ────────────────────────────────────────────────────────
+        # NOTE: Tab labels are string literals here — do NOT replace with
+        # variables. This ensures .pyc cache issues cannot affect the text.
         tabs = QTabWidget()
         root.addWidget(tabs)
 
         tabs.addTab(self._build_form_tab(METER_FIELDS),  "Meter Info")
         tabs.addTab(self._build_form_tab(AMR_FIELDS),    "AMR Info")
-        tabs.addTab(self._build_form_tab(TEST_FIELDS),   "Test & Failure")
-        tabs.addTab(self._build_form_tab(REVIEW_FIELDS), "Review & Approval")
+        tabs.addTab(self._build_form_tab(TEST_FIELDS),   "Test && Failure")
+        tabs.addTab(self._build_form_tab(REVIEW_FIELDS), "Review && Approval")
         tabs.addTab(self._build_attachments_tab(),       "Attachments")
 
     def _build_form_tab(self, field_defs: list[tuple[str, str]]) -> QScrollArea:
@@ -277,7 +305,6 @@ class NewReportDialog(QDialog):
         All other keys with no value (empty string / null date) are omitted
         so SQL Server can apply column defaults instead of inserting NULL.
         """
-        # [New ID] is mandatory — always first so it's easy to see in logs
         fields: dict = {"New ID": self._next_new_id}
 
         for db_key, widget in self._field_widgets.items():
@@ -303,7 +330,7 @@ class NewReportDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Created",
-                f"Report created successfully. FR Index: {new_index}",
+                f"Report created successfully.\nFR Index: {new_index}  |  New ID: {self._next_new_id}",
             )
             self.accept()
         else:
@@ -312,6 +339,16 @@ class NewReportDialog(QDialog):
                 "Create Failed",
                 "Save failed — please try again.",
             )
+
+    # ------------------------------------------------------------------
+    # Keyboard
+    # ------------------------------------------------------------------
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
 
 
 # ---------------------------------------------------------------------------

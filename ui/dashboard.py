@@ -4,15 +4,28 @@ Dashboard window — main entry point for the FR management application.
 Displays a searchable, sortable table of all failure reports. Filters call
 search_reports() in real time. Clicking a row emits report_selected(index)
 so the detail/edit view can be opened by the parent application.
+
+Day 3 changes
+-------------
+* New ID column sorts numerically via a custom QSortFilterProxyModel that
+  stores the raw int in Qt.ItemDataRole.UserRole alongside the display text.
+* Row colour logic updated: Pass/Anomaly use 'Checked'/'Unchecked' (same
+  encoding as FR_Approved), not 'no'/'false' text strings.
+* Delete button added to the filter bar — fires delete_report() after a
+  two-step confirmation dialog, then refreshes the dashboard.
+* Keyboard shortcuts: Ctrl+N (new report), Del (delete selected row),
+  F5 (refresh), Escape closes focus from search box.
+* Column widths are saved to QSettings and restored on next launch.
 """
 
 from PyQt6.QtCore import (
     Qt,
+    QSettings,
     QSortFilterProxyModel,
     QTimer,
     pyqtSignal,
 )
-from PyQt6.QtGui import QColor, QFont, QStandardItem, QStandardItemModel
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -22,6 +35,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QStatusBar,
@@ -30,7 +44,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from db.queries import fetch_all_reports, search_reports
+from db.queries import delete_report, fetch_all_reports, search_reports
 
 
 # ---------------------------------------------------------------------------
@@ -39,27 +53,31 @@ from db.queries import fetch_all_reports, search_reports
 
 # (display header, dict key from query result)
 COLUMNS = [
-    ("New ID",             "New ID"),
-    ("Project",            "Project"),
-    ("Project #",          "Project_Number"),
-    ("Meter Type",         "Meter_Type"),
-    ("Serial Number",      "Meter_Serial_Number"),
-    ("Test Type",          "Test_Type"),
-    ("Date Failed",        "Date Failed"),
-    ("Tested By",          "Tested By"),
-    ("Assigned To",        "Assigned To"),
-    ("Pass",               "Pass"),
-    ("Anomaly",            "Anomaly"),
-    ("FR Approved",        "FR_Approved"),
-    ("Date Closed",        "Date Closed"),
+    ("New ID",          "New ID"),
+    ("Project",         "Project"),
+    ("Project #",       "Project Number"),
+    ("Meter Type",      "Meter Type"),
+    ("Serial Number",   "Meter Serial Number"),
+    ("Test Type",       "Test Type"),
+    ("Date Failed",     "Date Failed"),
+    ("Tested By",       "Tested By"),
+    ("Assigned To",     "Assigned To"),
+    ("Pass",            "Pass"),
+    ("Anomaly",         "Anomaly"),
+    ("FR Approved",     "FR Approved"),
+    ("Date Closed",     "Date Closed"),
 ]
 
 HEADERS = [col[0] for col in COLUMNS]
 KEYS    = [col[1] for col in COLUMNS]
 
 # Column indices used for conditional row colouring
-COL_APPROVED = KEYS.index("FR_Approved")
+COL_APPROVED = KEYS.index("FR Approved")
 COL_PASS     = KEYS.index("Pass")
+COL_ANOMALY  = KEYS.index("Anomaly")
+
+# Index of the New ID column (needs numeric sort treatment)
+COL_NEW_ID   = KEYS.index("New ID")
 
 # Debounce delay (ms) before firing a search query after the user types
 SEARCH_DEBOUNCE_MS = 300
@@ -84,6 +102,31 @@ TEST_TYPE_OPTIONS = [
     "Past Tests",
 ]
 
+# QSettings identifiers
+SETTINGS_ORG  = "GELab"
+SETTINGS_APP  = "FRDatabase"
+SETTINGS_COLS = "dashboard/column_widths"
+
+
+# ---------------------------------------------------------------------------
+# Numeric-aware sort proxy
+# ---------------------------------------------------------------------------
+
+class NumericSortProxyModel(QSortFilterProxyModel):
+    """
+    Proxy that sorts the New ID column numerically by reading the int stored
+    in Qt.ItemDataRole.UserRole, while all other columns sort by display text.
+    """
+
+    def lessThan(self, left, right):
+        if left.column() == COL_NEW_ID:
+            lv = self.sourceModel().data(left,  Qt.ItemDataRole.UserRole)
+            rv = self.sourceModel().data(right, Qt.ItemDataRole.UserRole)
+            # Fall back to text sort if UserRole data is not available
+            if isinstance(lv, int) and isinstance(rv, int):
+                return lv < rv
+        return super().lessThan(left, right)
+
 
 # ---------------------------------------------------------------------------
 # Table model
@@ -103,23 +146,49 @@ class ReportTableModel(QStandardItemModel):
 
         for report in reports:
             row_items = []
-            for key in KEYS:
+            for i, key in enumerate(KEYS):
                 raw = report.get(key)
                 text = "" if raw is None else str(raw)
+
                 # Strip time component from date columns so they read cleanly
                 if "Date" in key and " " in text:
                     text = text.split(" ")[0]
+
                 item = QStandardItem(text)
                 item.setEditable(False)
+
+                # Store the raw integer for New ID so the proxy can sort numerically
+                if i == COL_NEW_ID and raw is not None:
+                    try:
+                        item.setData(int(raw), Qt.ItemDataRole.UserRole)
+                    except (ValueError, TypeError):
+                        pass
+
                 row_items.append(item)
 
+            # ------------------------------------------------------------------
             # Row-level colour hints
-            approved = report.get("FR_Approved", "")
-            passed   = str(report.get("Pass", "")).strip().lower()
+            #
+            # All three flag columns (FR_Approved, Pass, Anomaly) are stored as
+            # nvarchar with values 'Checked' or 'Unchecked' (matching the VB
+            # CheckBox serialisation used throughout the legacy system).
+            #
+            # Priority (highest → lowest):
+            #   1. amber  — FR not yet approved  (FR_Approved == 'Unchecked')
+            #   2. red    — report failed         (Pass == 'Unchecked')
+            #   3. yellow — anomaly flagged       (Anomaly == 'Checked')
+            #   (no colour for fully approved / passed reports)
+            # ------------------------------------------------------------------
+            approved = str(report.get("FR_Approved", "") or "").strip()
+            passed   = str(report.get("Pass",        "") or "").strip()
+            anomaly  = str(report.get("Anomaly",     "") or "").strip()
+
             if approved == "Unchecked":
-                colour = QColor("#fff3cd")   # amber — pending review
-            elif passed in ("no", "false", "0", "fail"):
+                colour = QColor("#fff3cd")   # amber — pending approval
+            elif passed == "Unchecked":
                 colour = QColor("#fde8e8")   # soft red — open failure
+            elif anomaly == "Checked":
+                colour = QColor("#fffbe6")   # pale yellow — anomaly noted
             else:
                 colour = None
 
@@ -149,9 +218,11 @@ class DashboardWindow(QMainWindow):
     -------
     report_selected : int
         Emitted with the [Index] value when the user double-clicks a row.
+    new_report_requested :
+        Emitted when the user clicks "+ New Report".
     """
 
-    report_selected     = pyqtSignal(int)
+    report_selected      = pyqtSignal(int)
     new_report_requested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -160,7 +231,7 @@ class DashboardWindow(QMainWindow):
         self.resize(1400, 800)
 
         self._model = ReportTableModel(self)
-        self._proxy = QSortFilterProxyModel(self)
+        self._proxy = NumericSortProxyModel(self)
         self._proxy.setSourceModel(self._model)
         self._proxy.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
@@ -171,6 +242,7 @@ class DashboardWindow(QMainWindow):
 
         self._build_ui()
         self._load_all()
+        self._restore_column_widths()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -229,15 +301,28 @@ class DashboardWindow(QMainWindow):
         self._approved_combo.currentIndexChanged.connect(self._schedule_search)
         filter_bar.addWidget(self._approved_combo)
 
-        # New Report button
+        # New Report button (Ctrl+N)
         self._new_report_btn = QPushButton("+ New Report")
         self._new_report_btn.setFixedWidth(100)
+        self._new_report_btn.setShortcut(QKeySequence("Ctrl+N"))
+        self._new_report_btn.setToolTip("Create a new failure report  (Ctrl+N)")
         self._new_report_btn.clicked.connect(self.new_report_requested.emit)
         filter_bar.addWidget(self._new_report_btn)
 
-        # Refresh button
+        # Delete button (Del key)
+        self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setFixedWidth(70)
+        self._delete_btn.setShortcut(QKeySequence("Delete"))
+        self._delete_btn.setToolTip("Delete selected report  (Del)")
+        self._delete_btn.setEnabled(False)   # enabled only when a row is selected
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+        filter_bar.addWidget(self._delete_btn)
+
+        # Refresh button (F5)
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.setFixedWidth(80)
+        self._refresh_btn.setShortcut(QKeySequence("F5"))
+        self._refresh_btn.setToolTip("Reload all reports from the database  (F5)")
         self._refresh_btn.clicked.connect(self._load_all)
         filter_bar.addWidget(self._refresh_btn)
 
@@ -247,12 +332,8 @@ class DashboardWindow(QMainWindow):
         self._table = QTableView()
         self._table.setModel(self._proxy)
         self._table.setSortingEnabled(True)
-        self._table.setSelectionBehavior(
-            QTableView.SelectionBehavior.SelectRows
-        )
-        self._table.setSelectionMode(
-            QTableView.SelectionMode.SingleSelection
-        )
+        self._table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self._table.setAlternatingRowColors(True)
         self._table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         self._table.verticalHeader().setVisible(False)
@@ -265,32 +346,58 @@ class DashboardWindow(QMainWindow):
         self._table.setWordWrap(False)
 
         # Sensible default column widths
-        default_widths = {
-            "New ID": 70,
-            "Project": 120,
-            "Project #": 90,
-            "Meter Type": 130,
-            "Serial Number": 130,
-            "Test Type": 100,
-            "Date Failed": 95,
-            "Tested By": 110,
-            "Assigned To": 110,
-            "Pass": 55,
-            "Anomaly": 65,
-            "FR Approved": 95,
-            "Date Closed": 95,
+        self._default_widths = {
+            "New ID":        70,
+            "Project":      120,
+            "Project #":     90,
+            "Meter Type":   130,
+            "Serial Number":130,
+            "Test Type":    100,
+            "Date Failed":   95,
+            "Tested By":    110,
+            "Assigned To":  110,
+            "Pass":          55,
+            "Anomaly":       65,
+            "FR Approved":   95,
+            "Date Closed":   95,
         }
         for i, header in enumerate(HEADERS):
-            if header in default_widths:
-                self._table.setColumnWidth(i, default_widths[header])
+            if header in self._default_widths:
+                self._table.setColumnWidth(i, self._default_widths[header])
 
         self._table.doubleClicked.connect(self._on_row_double_clicked)
+
+        # Enable/disable Delete button based on selection
+        self._table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+
+        # Save column widths when the user resizes them
+        self._table.horizontalHeader().sectionResized.connect(self._save_column_widths)
+
         root.addWidget(self._table)
 
         # ── Status bar ─────────────────────────────────────────────────
         self._status = QStatusBar()
         self.setStatusBar(self._status)
         self._status.showMessage("Loading…")
+
+    # ------------------------------------------------------------------
+    # Column width persistence
+    # ------------------------------------------------------------------
+
+    def _save_column_widths(self):
+        settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        widths = [self._table.columnWidth(i) for i in range(len(HEADERS))]
+        settings.setValue(SETTINGS_COLS, widths)
+
+    def _restore_column_widths(self):
+        settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+        widths = settings.value(SETTINGS_COLS)
+        if widths and len(widths) == len(HEADERS):
+            for i, w in enumerate(widths):
+                try:
+                    self._table.setColumnWidth(i, int(w))
+                except (ValueError, TypeError):
+                    pass
 
     # ------------------------------------------------------------------
     # Data loading
@@ -302,7 +409,7 @@ class DashboardWindow(QMainWindow):
         QApplication.processEvents()
         reports = fetch_all_reports()
         self._model.load(reports)
-        self._proxy.sort(0, Qt.SortOrder.AscendingOrder)
+        self._proxy.sort(COL_NEW_ID, Qt.SortOrder.AscendingOrder)
         count = self._model.rowCount()
         self._status.showMessage(f"{count} report{'s' if count != 1 else ''} loaded.")
 
@@ -338,7 +445,87 @@ class DashboardWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
-    # Row selection
+    # Selection handling
+    # ------------------------------------------------------------------
+
+    def _on_selection_changed(self):
+        has_selection = self._table.selectionModel().hasSelection()
+        self._delete_btn.setEnabled(has_selection)
+
+    def _selected_db_index(self) -> int | None:
+        """Return the [Index] PK of the currently selected row, or None."""
+        selected = self._table.selectionModel().selectedRows()
+        if not selected:
+            return None
+        proxy_index = selected[0]
+        source_index = self._proxy.mapToSource(proxy_index)
+        return self._model.index_for_row(source_index.row())
+
+    # ------------------------------------------------------------------
+    # Delete
+    # ------------------------------------------------------------------
+
+    def _on_delete_clicked(self):
+        db_index = self._selected_db_index()
+        if db_index is None:
+            return
+
+        # First confirmation — show which report will be deleted
+        # Resolve a display label from the selected row
+        selected = self._table.selectionModel().selectedRows()
+        proxy_row = selected[0].row()
+        new_id_item = self._proxy.data(
+            self._proxy.index(proxy_row, COL_NEW_ID)
+        )
+        project_item = self._proxy.data(
+            self._proxy.index(proxy_row, KEYS.index("Project"))
+        )
+        label = f"FR #{new_id_item}" + (f" — {project_item}" if project_item else "")
+
+        confirm1 = QMessageBox(self)
+        confirm1.setWindowTitle("Delete Report")
+        confirm1.setIcon(QMessageBox.Icon.Warning)
+        confirm1.setText(f"Are you sure you want to delete\n<b>{label}</b>?")
+        confirm1.setInformativeText(
+            "This will permanently remove the report and any associated "
+            "attachments from the database. This action cannot be undone."
+        )
+        confirm1.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+        )
+        confirm1.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        if confirm1.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        # Second confirmation — extra safety for destructive action
+        confirm2 = QMessageBox(self)
+        confirm2.setWindowTitle("Confirm Permanent Delete")
+        confirm2.setIcon(QMessageBox.Icon.Critical)
+        confirm2.setText("This is your final confirmation.")
+        confirm2.setInformativeText(
+            f"Permanently delete <b>{label}</b>?\n\nThis cannot be undone."
+        )
+        confirm2.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+        )
+        confirm2.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        if confirm2.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        # Execute delete
+        success = delete_report(db_index)
+        if success:
+            self._status.showMessage(f"Deleted {label}.")
+            self._load_all()
+        else:
+            QMessageBox.critical(
+                self, "Delete Failed",
+                f"Could not delete {label}.\n\n"
+                "The record may have already been removed, or a database error occurred."
+            )
+
+    # ------------------------------------------------------------------
+    # Row double-click → open detail
     # ------------------------------------------------------------------
 
     def _on_row_double_clicked(self, proxy_index):
@@ -348,6 +535,14 @@ class DashboardWindow(QMainWindow):
         if db_index is not None:
             self.report_selected.emit(db_index)
 
+    # ------------------------------------------------------------------
+    # Window close — save column widths one final time
+    # ------------------------------------------------------------------
+
+    def closeEvent(self, event):
+        self._save_column_widths()
+        super().closeEvent(event)
+
 
 # ---------------------------------------------------------------------------
 # Standalone entry point (dev / testing)
@@ -356,8 +551,6 @@ class DashboardWindow(QMainWindow):
 if __name__ == "__main__":
     import sys
     from pathlib import Path
-    # Ensure the project root is on sys.path when this file is run directly
-    # (i.e. `python ui/dashboard.py`).  Running via main.py is preferred.
     _project_root = Path(__file__).resolve().parent.parent
     if str(_project_root) not in sys.path:
         sys.path.insert(0, str(_project_root))
