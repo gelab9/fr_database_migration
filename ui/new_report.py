@@ -48,7 +48,7 @@ from ui.detail_view import (
 
 
 # ---------------------------------------------------------------------------
-# Dropdown options (match README values)
+# Dropdown options
 # ---------------------------------------------------------------------------
 
 EUT_TYPE_OPTIONS = ["", "AMI", "Meter Only", "AMR Only", "OTHER EUT"]

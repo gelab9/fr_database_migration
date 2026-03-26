@@ -16,6 +16,12 @@ Day 3 changes
 * Keyboard shortcuts: Ctrl+N (new report), Del (delete selected row),
   F5 (refresh), Escape closes focus from search box.
 * Column widths are saved to QSettings and restored on next launch.
+* objectName set on action buttons so style.qss selectors fire correctly.
+* Row colours updated to approved palette:
+    green  #c7e196  fully approved + passed
+    amber  #fff3cd  pending approval
+    red    #f9c2c2  open failure
+    yellow #fffbe6  anomaly flagged
 """
 
 from PyQt6.QtCore import (
@@ -107,6 +113,14 @@ SETTINGS_ORG  = "GELab"
 SETTINGS_APP  = "FRDatabase"
 SETTINGS_COLS = "dashboard/column_widths"
 
+# ---------------------------------------------------------------------------
+# Approved row colour palette
+# ---------------------------------------------------------------------------
+COLOR_ROW_GREEN  = "#c7e196"   # FR Approved + Pass both Checked — fully complete
+COLOR_ROW_AMBER  = "#fff3cd"   # FR Approved = Unchecked — pending approval
+COLOR_ROW_RED    = "#f9c2c2"   # Pass = Unchecked — open failure
+COLOR_ROW_YELLOW = "#fffbe6"   # Anomaly = Checked — anomaly flagged
+
 
 # ---------------------------------------------------------------------------
 # Numeric-aware sort proxy
@@ -169,26 +183,29 @@ class ReportTableModel(QStandardItemModel):
             # ------------------------------------------------------------------
             # Row-level colour hints
             #
-            # All three flag columns (FR_Approved, Pass, Anomaly) are stored as
+            # All three flag columns (FR Approved, Pass, Anomaly) are stored as
             # nvarchar with values 'Checked' or 'Unchecked' (matching the VB
             # CheckBox serialisation used throughout the legacy system).
             #
             # Priority (highest → lowest):
-            #   1. amber  — FR not yet approved  (FR_Approved == 'Unchecked')
-            #   2. red    — report failed         (Pass == 'Unchecked')
-            #   3. yellow — anomaly flagged       (Anomaly == 'Checked')
-            #   (no colour for fully approved / passed reports)
+            #   1. green  — fully complete   (FR Approved AND Pass = Checked)
+            #   2. amber  — pending approval (FR Approved = Unchecked)
+            #   3. red    — open failure      (Pass = Unchecked)
+            #   4. yellow — anomaly flagged   (Anomaly = Checked)
+            #   (no colour when no flags are set)
             # ------------------------------------------------------------------
             approved = str(report.get("FR_Approved", "") or "").strip()
             passed   = str(report.get("Pass",        "") or "").strip()
             anomaly  = str(report.get("Anomaly",     "") or "").strip()
 
-            if approved == "Unchecked":
-                colour = QColor("#fff3cd")   # amber — pending approval
+            if approved == "Checked" and passed == "Checked":
+                colour = QColor(COLOR_ROW_GREEN)
+            elif approved == "Unchecked":
+                colour = QColor(COLOR_ROW_AMBER)
             elif passed == "Unchecked":
-                colour = QColor("#fde8e8")   # soft red — open failure
+                colour = QColor(COLOR_ROW_RED)
             elif anomaly == "Checked":
-                colour = QColor("#fffbe6")   # pale yellow — anomaly noted
+                colour = QColor(COLOR_ROW_YELLOW)
             else:
                 colour = None
 
@@ -303,6 +320,7 @@ class DashboardWindow(QMainWindow):
 
         # New Report button (Ctrl+N)
         self._new_report_btn = QPushButton("+ New Report")
+        self._new_report_btn.setObjectName("new_report_btn")
         self._new_report_btn.setFixedWidth(100)
         self._new_report_btn.setShortcut(QKeySequence("Ctrl+N"))
         self._new_report_btn.setToolTip("Create a new failure report  (Ctrl+N)")
@@ -311,6 +329,7 @@ class DashboardWindow(QMainWindow):
 
         # Delete button (Del key)
         self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setObjectName("delete_btn")
         self._delete_btn.setFixedWidth(70)
         self._delete_btn.setShortcut(QKeySequence("Delete"))
         self._delete_btn.setToolTip("Delete selected report  (Del)")
@@ -470,8 +489,6 @@ class DashboardWindow(QMainWindow):
         if db_index is None:
             return
 
-        # First confirmation — show which report will be deleted
-        # Resolve a display label from the selected row
         selected = self._table.selectionModel().selectedRows()
         proxy_row = selected[0].row()
         new_id_item = self._proxy.data(
@@ -497,7 +514,6 @@ class DashboardWindow(QMainWindow):
         if confirm1.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        # Second confirmation — extra safety for destructive action
         confirm2 = QMessageBox(self)
         confirm2.setWindowTitle("Confirm Permanent Delete")
         confirm2.setIcon(QMessageBox.Icon.Critical)
@@ -512,7 +528,6 @@ class DashboardWindow(QMainWindow):
         if confirm2.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        # Execute delete
         success = delete_report(db_index)
         if success:
             self._status.showMessage(f"Deleted {label}.")

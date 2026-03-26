@@ -222,18 +222,21 @@ class DetailDialog(QDialog):
         header_row.addWidget(self._edit_btn)
 
         self._save_btn = QPushButton("Save")
+        self._save_btn.setObjectName("save_btn")
         self._save_btn.setFixedWidth(70)
         self._save_btn.setVisible(False)
         self._save_btn.clicked.connect(self._on_save_clicked)
         header_row.addWidget(self._save_btn)
 
         self._pdf_btn = QPushButton("Export PDF")
+        self._pdf_btn.setObjectName("pdf_btn")
         self._pdf_btn.setFixedWidth(90)
         self._pdf_btn.setToolTip("Export this report as a PDF file")
         self._pdf_btn.clicked.connect(self._on_export_pdf)
         header_row.addWidget(self._pdf_btn)
 
         self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setObjectName("delete_btn")
         self._delete_btn.setFixedWidth(70)
         self._delete_btn.setToolTip("Permanently delete this report")
         self._delete_btn.clicked.connect(self._on_delete_clicked)
@@ -259,8 +262,8 @@ class DetailDialog(QDialog):
 
         self._tabs.addTab(self._build_form_tab(METER_FIELDS),  "Meter Info")
         self._tabs.addTab(self._build_form_tab(AMR_FIELDS),    "AMR Info")
-        self._tabs.addTab(self._build_form_tab(TEST_FIELDS),   "Test & Failure")
-        self._tabs.addTab(self._build_form_tab(REVIEW_FIELDS), "Review & Approval")
+        self._tabs.addTab(self._build_form_tab(TEST_FIELDS),   "Test && Failure")
+        self._tabs.addTab(self._build_form_tab(REVIEW_FIELDS), "Review && Approval")
         self._tabs.addTab(self._build_attachments_tab(),       "Attachments")
 
         self.setStyleSheet(_READONLY_STYLE)
