@@ -1,4 +1,67 @@
-COLOR_ROW_GREEN  = "#c7e196"
-COLOR_ROW_AMBER  = "#fff3cd"
-COLOR_ROW_RED    = "#f9c2c2"
-COLOR_ROW_YELLOW = "#fffbe6"
+/* FR Database — Application Stylesheet */
+
+QPushButton#new_report_btn {
+    background-color: #4a90d9;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-weight: bold;
+}
+
+QPushButton#new_report_btn:hover {
+    background-color: #3a7bc8;
+}
+
+QPushButton#new_report_btn:pressed {
+    background-color: #2d6ab8;
+}
+
+QPushButton#delete_btn {
+    background-color: #d9534f;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+QPushButton#delete_btn:hover {
+    background-color: #c9302c;
+}
+
+QPushButton#delete_btn:pressed {
+    background-color: #ac2925;
+}
+
+QPushButton#save_btn {
+    background-color: #5cb85c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-weight: bold;
+}
+
+QPushButton#save_btn:hover {
+    background-color: #4cae4c;
+}
+
+QPushButton#save_btn:pressed {
+    background-color: #398439;
+}
+
+QPushButton#pdf_btn {
+    background-color: #f0ad4e;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+QPushButton#pdf_btn:hover {
+    background-color: #ec971f;
+}
+
+QPushButton#pdf_btn:pressed {
+    background-color: #d58512;
+}
