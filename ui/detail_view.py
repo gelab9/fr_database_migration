@@ -20,6 +20,7 @@ Day 3 changes
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -37,12 +38,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from auth.session import current_user
+from auth.session import AccessLevel, ApproverDiscipline, current_user
 from db.lookup_queries import (
-    fetch_amr_models,
     fetch_amr_manufacturers,
+    fetch_amr_models,
     fetch_amr_subtypes,
     fetch_amr_types,
+    fetch_approvers_by_discipline,
     fetch_meter_bases,
     fetch_meter_forms,
     fetch_meter_manufacturers,
@@ -74,7 +76,51 @@ _COMBO_LOADERS: dict[str, callable] = {
     "AMR_Type":           lambda: [""] + fetch_amr_types(),
     "AMR_SUBType":        lambda: [""] + fetch_amr_subtypes(),
     "EUT_TYPE":           lambda: ["", "AMI", "Meter Only", "AMR Only", "OTHER EUT"],
+    # TCC approval combos — populated from APPROVERS table per discipline
+    "TCC 1": lambda: [""] + fetch_approvers_by_discipline("Compliance"),
+    "TCC 2": lambda: [""] + fetch_approvers_by_discipline("Development Engineering"),
+    "TCC 3": lambda: [""] + fetch_approvers_by_discipline("Manufacturing"),
+    "TCC 4": lambda: [""] + fetch_approvers_by_discipline("Product Management"),
+    "TCC 5": lambda: [""] + fetch_approvers_by_discipline("Supplier Quality"),
+    "TCC 6": lambda: [""] + fetch_approvers_by_discipline("Systems"),
 }
+
+# DB keys stored as nvarchar "Checked"/"Unchecked" — rendered as QCheckBox.
+# Mirrors VB CheckBox controls bound to these columns.
+_BOOL_KEYS: set[str] = {
+    "TCC_Review_Required",
+    "FR_Ready_For_Review",
+    "FR_Approved",
+    "Pass",
+    "Anomaly",
+    "Failed_Sample_Ready",
+}
+
+# TCC column → (ApproverDiscipline enum member, APPROVERS.DISCIPLINE string)
+# Used to gate per-discipline editability (matches VB lines 1059-1134).
+_TCC_DISCIPLINE_MAP: dict[str, tuple] = {
+    "TCC 1": (ApproverDiscipline.Compliance,               "Compliance"),
+    "TCC 2": (ApproverDiscipline.Engineering,               "Development Engineering"),
+    "TCC 3": (ApproverDiscipline.Manufacturing,             "Manufacturing"),
+    "TCC 4": (ApproverDiscipline.Product_Managment,         "Product Management"),
+    "TCC 5": (ApproverDiscipline.Quality_Product_Delivery,  "Supplier Quality"),
+    "TCC 6": (ApproverDiscipline.SYSTEMS,                   "Systems"),
+}
+
+_TCC_KEYS: set[str] = set(_TCC_DISCIPLINE_MAP.keys())
+
+
+def _can_edit_tcc(tcc_key: str) -> bool:
+    """
+    Return True if the current user may edit the given TCC slot.
+    Mirrors VB: only the matching discipline approver (or Admin) can write their TCC field.
+    """
+    if current_user.access_level.value < AccessLevel.APPROVER.value:
+        return False
+    if current_user.approver_discipline == ApproverDiscipline.Admin:
+        return True
+    disc_enum = _TCC_DISCIPLINE_MAP.get(tcc_key, (None,))[0]
+    return disc_enum is not None and disc_enum == current_user.approver_discipline
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +310,14 @@ class DetailDialog(QDialog):
         )
         header_row.addWidget(self._title_label)
 
+        # Submit for Review — POWER+ users (sets FR_READY_FOR_REVIEW=Checked and saves)
+        self._submit_review_btn = QPushButton("Submit for Review")
+        self._submit_review_btn.setObjectName("submit_review_btn")
+        self._submit_review_btn.setToolTip("Mark this report as Ready for TCC Review")
+        self._submit_review_btn.setVisible(current_user.can_create)
+        self._submit_review_btn.clicked.connect(self._on_submit_review_clicked)
+        header_row.addWidget(self._submit_review_btn)
+
         # Edit button — hidden for READ_ONLY / NO_ACCESS (matches VB access gating)
         self._edit_btn = QPushButton("Edit")
         self._edit_btn.setFixedWidth(70)
@@ -320,6 +374,19 @@ class DetailDialog(QDialog):
         self._tabs.addTab(self._build_form_tab(REVIEW_FIELDS),       "Review && Approval")
         self._tabs.addTab(self._build_attachments_tab(),             "Attachments")
 
+        # Wire TCC combos + TCC_Review_Required checkbox to auto-approve logic.
+        # Matches VB's CheckedChanged / TextChanged handlers (lines 5442-5466).
+        for tcc_key in _TCC_KEYS:
+            w = self._field_widgets.get(tcc_key)
+            if isinstance(w, QComboBox):
+                w.currentTextChanged.connect(self._check_auto_approve)
+        rfr_w = self._field_widgets.get("TCC_Review_Required")
+        if isinstance(rfr_w, QCheckBox):
+            rfr_w.stateChanged.connect(self._check_auto_approve)
+        dc_w = self._field_widgets.get("Date Corrected")
+        if isinstance(dc_w, QLineEdit):
+            dc_w.textChanged.connect(self._check_auto_approve)
+
         self.setStyleSheet(_READONLY_STYLE)
 
     def _build_form_tab(self, field_defs: list[tuple[str, str]]) -> QScrollArea:
@@ -362,6 +429,10 @@ class DetailDialog(QDialog):
             w.setMinimumHeight(160 if db_key in LARGE_MULTILINE_KEYS else 80)
             w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             w.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            return w
+        if db_key in _BOOL_KEYS:
+            w = QCheckBox()
+            w.setEnabled(False)   # read-only until Edit is clicked
             return w
         if db_key in _COMBO_LOADERS:
             w = QComboBox()
@@ -419,6 +490,8 @@ class DetailDialog(QDialog):
 
             if isinstance(widget, QTextEdit):
                 widget.setPlainText(text)
+            elif isinstance(widget, QCheckBox):
+                widget.setChecked(text.strip() == "Checked")
             elif isinstance(widget, QComboBox):
                 idx = widget.findText(text)
                 if idx >= 0:
@@ -464,8 +537,18 @@ class DetailDialog(QDialog):
         for db_key, widget in self._field_widgets.items():
             if isinstance(widget, QTextEdit):
                 widget.setReadOnly(not editable)
+            elif isinstance(widget, QCheckBox):
+                # FR_Approved is auto-managed by _check_auto_approve — never manually toggled
+                if db_key == "FR_Approved":
+                    widget.setEnabled(False)
+                else:
+                    widget.setEnabled(editable)
             elif isinstance(widget, QComboBox):
-                widget.setEnabled(editable)
+                if db_key in _TCC_KEYS:
+                    # Gate per-discipline: only the matching approver (or Admin) can edit
+                    widget.setEnabled(editable and _can_edit_tcc(db_key))
+                else:
+                    widget.setEnabled(editable)
             elif isinstance(widget, QLineEdit):
                 widget.setReadOnly(not editable)
 
@@ -501,6 +584,8 @@ class DetailDialog(QDialog):
         for db_key, widget in self._field_widgets.items():
             if isinstance(widget, QTextEdit):
                 fields[db_key] = widget.toPlainText() or None
+            elif isinstance(widget, QCheckBox):
+                fields[db_key] = "Checked" if widget.isChecked() else "Unchecked"
             elif isinstance(widget, QComboBox):
                 text = widget.currentText().strip()
                 fields[db_key] = text or None
@@ -509,6 +594,109 @@ class DetailDialog(QDialog):
                 fields[db_key] = text or None
 
         self.save_requested.emit(self._index, fields)
+
+    def _check_auto_approve(self, *_):
+        """
+        Auto-approval state machine — mirrors VB frmFailureBrowser lines 5442-5466.
+
+        Conditions to auto-approve (set FR_Approved = Checked):
+          • TCC_Review_Required = Checked
+          • All of TCC 1-6 have a non-empty approver name
+          • Date Corrected is non-empty
+        If TCC_Review_Required is Checked but conditions not met → FR_Approved = Unchecked.
+        """
+        if not self._editing:
+            return
+
+        tcc_req_w   = self._field_widgets.get("TCC_Review_Required")
+        fr_appr_w   = self._field_widgets.get("FR_Approved")
+        date_corr_w = self._field_widgets.get("Date Corrected")
+        date_appr_w = self._field_widgets.get("Date Approved")
+        date_cls_w  = self._field_widgets.get("Date Closed")
+
+        if not (tcc_req_w and fr_appr_w and date_corr_w):
+            return
+
+        tcc_required = (
+            tcc_req_w.isChecked()
+            if isinstance(tcc_req_w, QCheckBox)
+            else tcc_req_w.text().strip() == "Checked"
+        )
+
+        # Check all six TCC slots are filled
+        tcc_all_filled = True
+        for tcc_key in ("TCC 1", "TCC 2", "TCC 3", "TCC 4", "TCC 5", "TCC 6"):
+            w = self._field_widgets.get(tcc_key)
+            if w is None:
+                tcc_all_filled = False
+                break
+            val = (w.currentText().strip() if isinstance(w, QComboBox)
+                   else w.text().strip())
+            if not val:
+                tcc_all_filled = False
+                break
+
+        date_corrected = (
+            date_corr_w.text().strip() if isinstance(date_corr_w, QLineEdit) else ""
+        )
+
+        if not isinstance(fr_appr_w, QCheckBox):
+            return
+
+        if tcc_required and tcc_all_filled and date_corrected:
+            fr_appr_w.setChecked(True)
+            # Auto-fill Date Approved if empty
+            if isinstance(date_appr_w, QLineEdit) and not date_appr_w.text().strip():
+                from datetime import date as _date
+                date_appr_w.setText(_date.today().strftime("%Y-%m-%d"))
+            # Auto-fill Date Closed to Date Corrected if empty
+            if isinstance(date_cls_w, QLineEdit) and not date_cls_w.text().strip():
+                date_cls_w.setText(date_corrected)
+        elif tcc_required:
+            fr_appr_w.setChecked(False)
+
+    def _on_submit_review_clicked(self):
+        """
+        Set FR_READY_FOR_REVIEW = 'Checked' and immediately persist.
+        Visible only for POWER+ users (current_user.can_create).
+        Mirrors VB's "Submit for Review" flow.
+        """
+        reply = QMessageBox.question(
+            self,
+            "Submit for Review",
+            "Mark this report as <b>Ready for TCC Review</b>?\n\nThis will save the record immediately.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Build fields dict from current widget state
+        fields: dict = {}
+        for db_key, widget in self._field_widgets.items():
+            if isinstance(widget, QTextEdit):
+                fields[db_key] = widget.toPlainText() or None
+            elif isinstance(widget, QCheckBox):
+                fields[db_key] = "Checked" if widget.isChecked() else "Unchecked"
+            elif isinstance(widget, QComboBox):
+                text = widget.currentText().strip()
+                fields[db_key] = text or None
+            else:
+                text = widget.text().strip()
+                fields[db_key] = text or None
+
+        # Force the review flag regardless of current checkbox state
+        fields["FR_Ready_For_Review"] = "Checked"
+
+        success = update_report(self._index, fields)
+        if success:
+            self._report["FR_Ready_For_Review"] = "Checked"
+            rfr_w = self._field_widgets.get("FR_Ready_For_Review")
+            if isinstance(rfr_w, QCheckBox):
+                rfr_w.setChecked(True)
+            QMessageBox.information(self, "Submitted", "Report marked as Ready for Review.")
+        else:
+            QMessageBox.critical(self, "Save Failed", "Could not save — please try again.")
 
     def handle_save_result(self, success: bool):
         """Called by the save_requested handler after update_report() returns."""
@@ -638,13 +826,9 @@ class DetailDialog(QDialog):
             if v is None:
                 return ""
             s = str(v)
-            # Strip time from dates
             if " " in s and any(c.isdigit() for c in s[:4]):
                 s = s.split(" ")[0]
-            return (s
-                    .replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;"))
+            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         rows_html = ""
         for tab_name, fields in all_tabs:

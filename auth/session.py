@@ -150,10 +150,8 @@ current_user: User = User()  # starts as NO_ACCESS / not logged in
 
 
 def set_current_user(user: User) -> None:
-    global current_user
-    current_user = user
+    current_user.__dict__.update(user.__dict__)
 
 
 def clear_session() -> None:
-    global current_user
-    current_user = User()
+    current_user.__dict__.update(User().__dict__)

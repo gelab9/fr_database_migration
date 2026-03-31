@@ -459,6 +459,25 @@ def fetch_user_by_username(username: str) -> dict | None:
         conn.close()
 
 
+def fetch_approvers_by_discipline(discipline_name: str) -> list[str]:
+    """
+    Return active approver names for a specific discipline.
+    Used to populate TCC 1-6 combo boxes in the approval tab.
+    Maps to VB's per-discipline dropdown population in frmFailureBrowser.vb.
+
+    discipline_name values (from APPROVERS.DISCIPLINE column):
+      "Compliance", "Development Engineering", "Manufacturing",
+      "Product Management", "Supplier Quality", "Systems"
+    """
+    rows = _run(
+        "SELECT [APPROVER_NAME] FROM [APPROVERS] "
+        "WHERE [ACTIVE] = 1 AND [DISCIPLINE] = ? "
+        "ORDER BY [APPROVER_NAME]",
+        (discipline_name,),
+    )
+    return [str(r[0]).strip() for r in rows if r[0]]
+
+
 def fetch_active_usernames() -> list[str]:
     rows = _run(
         "SELECT [USERNAME] FROM [USERS] WHERE [ACTIVE] = 1 ORDER BY [USERNAME]"

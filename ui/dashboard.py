@@ -26,6 +26,7 @@ Day 3 changes
 
 from PyQt6.QtCore import (
     Qt,
+    QDateTime,
     QSettings,
     QSortFilterProxyModel,
     QTimer,
@@ -50,7 +51,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from auth.session import current_user
+from auth.session import AccessLevel, current_user
 from db.queries import delete_report, fetch_all_reports, search_reports
 
 
@@ -88,6 +89,9 @@ COL_NEW_ID   = KEYS.index("New ID")
 
 # Debounce delay (ms) before firing a search query after the user types
 SEARCH_DEBOUNCE_MS = 300
+
+# Auto-refresh interval — keeps all engineers' dashboards in sync without manual F5
+AUTO_REFRESH_INTERVAL_MS = 60_000   # 60 seconds
 
 # Approval filter dropdown options: (label, value passed to search_reports)
 APPROVED_OPTIONS = [
@@ -258,9 +262,15 @@ class DashboardWindow(QMainWindow):
         self._debounce.setSingleShot(True)
         self._debounce.timeout.connect(self._apply_filters)
 
+        # Auto-refresh timer — keeps all engineers in sync without manual F5
+        self._auto_refresh_timer = QTimer(self)
+        self._auto_refresh_timer.setInterval(AUTO_REFRESH_INTERVAL_MS)
+        self._auto_refresh_timer.timeout.connect(self._on_auto_refresh)
+
         self._build_ui()
         self._load_all()
         self._restore_column_widths()
+        self._auto_refresh_timer.start()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -370,6 +380,14 @@ class DashboardWindow(QMainWindow):
         self._clear_filter_btn.clicked.connect(self._on_clear_filter_clicked)
         filter_bar.addWidget(self._clear_filter_btn)
 
+        # Test Equipment button — opens equipment management (POWER+ users)
+        if current_user.access_level >= AccessLevel.CREATE_NEW:
+            self._equip_btn = QPushButton("Test Equipment")
+            self._equip_btn.setObjectName("equip_btn")
+            self._equip_btn.setToolTip("Manage test equipment inventory")
+            self._equip_btn.clicked.connect(self._on_test_equipment_clicked)
+            filter_bar.addWidget(self._equip_btn)
+
         # Refresh button (F5)
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.setFixedWidth(80)
@@ -460,6 +478,14 @@ class DashboardWindow(QMainWindow):
                     pass
 
     # ------------------------------------------------------------------
+    # Test Equipment
+    # ------------------------------------------------------------------
+
+    def _on_test_equipment_clicked(self):
+        from ui.test_equipment import open_test_equipment
+        open_test_equipment(parent=self)
+
+    # ------------------------------------------------------------------
     # Advanced filter
     # ------------------------------------------------------------------
 
@@ -500,7 +526,42 @@ class DashboardWindow(QMainWindow):
         self._model.load(reports)
         self._proxy.sort(COL_NEW_ID, Qt.SortOrder.AscendingOrder)
         count = self._model.rowCount()
-        self._status.showMessage(f"{count} report{'s' if count != 1 else ''} loaded.")
+        ts = QDateTime.currentDateTime().toString("h:mm:ss AP")
+        self._status.showMessage(
+            f"{count} report{'s' if count != 1 else ''} loaded.  |  "
+            f"Last refreshed: {ts}  |  Auto-refresh: {AUTO_REFRESH_INTERVAL_MS // 1000}s"
+        )
+
+    def _on_auto_refresh(self):
+        """
+        Fired by the auto-refresh timer every AUTO_REFRESH_INTERVAL_MS ms.
+        Re-applies whichever data is currently shown so all engineers stay in sync.
+        Skips silently if a debounce search is pending to avoid conflicting queries.
+        """
+        if self._debounce.isActive():
+            return
+        if self._active_filter_clause:
+            # Re-run the active advanced filter
+            from db.queries import search_with_filter
+            rows = search_with_filter(self._active_filter_clause)
+            self._model.load(rows)
+            self._proxy.sort(
+                self._table.horizontalHeader().sortIndicatorSection(),
+                self._table.horizontalHeader().sortIndicatorOrder(),
+            )
+            count = self._model.rowCount()
+            ts = QDateTime.currentDateTime().toString("h:mm:ss AP")
+            clause_summary = (
+                f"{self._active_filter_clause[:50]}…"
+                if len(self._active_filter_clause) > 50
+                else self._active_filter_clause
+            )
+            self._status.showMessage(
+                f"{count} report{'s' if count != 1 else ''} matched.  |  "
+                f"Filter: {clause_summary}  |  Last refreshed: {ts}"
+            )
+        else:
+            self._load_all()
 
     def _schedule_search(self):
         """Restart the debounce timer on every filter change."""

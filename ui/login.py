@@ -162,16 +162,20 @@ def authenticate(username: str, password: str) -> tuple[bool, str]:
     if user_row is None:
         return False, "Username not found. Check your username and password and try again."
 
-    db_password   = str(user_row.get("PASSWORD",        "") or "").strip()
-    db_first      = str(user_row.get("FIRSTNAME",       "") or "").strip()
-    db_last       = str(user_row.get("LASTNAME",        "") or "").strip()
-    db_email      = str(user_row.get("email",           "") or "").strip()
-    db_active     = user_row.get("ACTIVE",       False)
-    db_pw_reset   = user_row.get("PASSWORDISRESET", False)
-    db_user_id    = int(user_row.get("ID", 0) or 0)
+    # Normalize the row keys to lowercase for reliable access
+    user_row = {k.lower(): v for k, v in user_row.items()}
+
+    db_password = str(user_row.get("password",        "") or "").strip()
+    db_first     = str(user_row.get("firstname",       "") or "").strip()
+    db_last      = str(user_row.get("lastname",        "") or "").strip()
+    db_email     = str(user_row.get("email",           "") or "").strip()
+    db_active    = user_row.get("active",       False)
+    db_pw_reset  = user_row.get("passwordisreset", False)
+    db_user_id   = int(user_row.get("id", 0) or 0)
+    db_access    = user_row.get("accesslevel", 0)
 
     try:
-        db_access = AccessLevel(int(user_row.get("ACCESSLEVEL", 0) or 0))
+        db_access = AccessLevel(int(user_row.get("accesslevel", 0) or 0))
     except (ValueError, TypeError):
         db_access = AccessLevel.READ_ONLY
 
