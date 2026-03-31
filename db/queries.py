@@ -24,6 +24,8 @@ SUMMARY_COLUMNS = [
     "[Meter_Type]",
     "[Meter_Serial_Number]",
     "[Test_Type]",
+    "[Test]",
+    "[Test_Matrix_ID]",
     "[Date Failed]",
     "[Tested By]",
     "[Assigned To]",
@@ -47,13 +49,23 @@ def _rows_to_dicts(cursor, rows):
 # Fetch all reports (summary columns only, ordered by [New ID])
 # ---------------------------------------------------------------------------
 
-def fetch_all_reports():
+def fetch_all_reports(open_only: bool = False):
     """
     Return a list of dicts for every report, using summary columns only.
     Ordered by [New ID] ascending (mirrors the GET_FR_DATA stored procedure).
+
+    Parameters
+    ----------
+    open_only : bool
+        When True, restrict to reports where [FR_Approved] = 'Unchecked'
+        OR [Pass] = 'Unchecked' (i.e. not yet fully closed out).
     """
     cols = ", ".join(SUMMARY_COLUMNS)
-    sql = f"SELECT {cols} FROM [Failure Report] ORDER BY [New ID]"
+    where = (
+        "WHERE ([FR_Approved] = 'Unchecked' OR [Pass] = 'Unchecked')"
+        if open_only else ""
+    )
+    sql = f"SELECT {cols} FROM [Failure Report] {where} ORDER BY [New ID]"
 
     conn = get_connection()
     if conn is None:
@@ -133,6 +145,7 @@ def search_reports(
     approved: bool | None = None,
     date_failed_from=None,
     date_failed_to=None,
+    open_only: bool = False,
 ):
     """
     Return summary-column rows matching the supplied filters.
@@ -198,6 +211,9 @@ def search_reports(
     if date_failed_to is not None:
         conditions.append("[Date Failed] <= ?")
         params.append(date_failed_to)
+
+    if open_only:
+        conditions.append("([FR_Approved] = 'Unchecked' OR [Pass] = 'Unchecked')")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     sql = f"SELECT {cols} FROM [Failure Report] {where} ORDER BY [New ID]"
@@ -413,6 +429,84 @@ def get_next_new_id() -> int:
         return int(row[0]) + 1
     except pyodbc.Error as e:
         raise RuntimeError(f"get_next_new_id error: {e}") from e
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Advanced filter search (mirrors frmFilter.vb Filter_BuildFilter result)
+# ---------------------------------------------------------------------------
+
+def search_with_filter(where_clause: str, open_only: bool = False) -> list[dict]:
+    """
+    Run a summary-column SELECT with an arbitrary SQL WHERE clause string.
+
+    The where_clause comes from FilterDialog._build_filter() and is a raw SQL
+    string built from the user's filter selections — mirrors frmFilter.vb's
+    gMyFailureReportBindingSource.Filter assignment.
+
+    Parameters
+    ----------
+    where_clause : str
+        Raw SQL predicate string (no leading WHERE keyword).  May be empty to
+        return all rows.
+    open_only : bool
+        When True, AND in the open-reports check on top of the filter.
+
+    Returns
+    -------
+    list[dict]
+        Summary-column rows ordered by [New ID].
+    """
+    cols = ", ".join(SUMMARY_COLUMNS)
+    parts = []
+    if where_clause and where_clause.strip():
+        parts.append(f"({where_clause})")
+    if open_only:
+        parts.append("([FR_Approved] = 'Unchecked' OR [Pass] = 'Unchecked')")
+    where = ("WHERE " + " AND ".join(parts)) if parts else ""
+    sql = f"SELECT {cols} FROM [Failure Report] {where} ORDER BY [New ID]"
+
+    conn = get_connection()
+    if conn is None:
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        return _rows_to_dicts(cursor, cursor.fetchall())
+    except pyodbc.Error as e:
+        print(f"search_with_filter error: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def fetch_distinct_column_values(column: str) -> list[str]:
+    """
+    Return sorted distinct non-null, non-empty values from a [Failure Report]
+    column.  Used to populate filter combo dropdowns from actual data
+    (mirrors VB's BindingSource-driven distinct-value combos in frmFilter).
+
+    Parameters
+    ----------
+    column : str
+        Column name WITHOUT brackets; brackets are added internally.
+    """
+    sql = (
+        f"SELECT DISTINCT [{column}] FROM [Failure Report] "
+        f"WHERE [{column}] IS NOT NULL AND LTRIM(RTRIM([{column}])) <> '' "
+        f"ORDER BY [{column}]"
+    )
+    conn = get_connection()
+    if conn is None:
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        return [str(row[0]) for row in cursor.fetchall()]
+    except pyodbc.Error as e:
+        print(f"fetch_distinct_column_values({column}) error: {e}")
+        return []
     finally:
         conn.close()
 

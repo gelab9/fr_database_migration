@@ -37,13 +37,32 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from db.lookup_queries import (
+    fetch_amr_models,
+    fetch_amr_manufacturers,
+    fetch_amr_types,
+    fetch_amr_subtypes,
+    fetch_meter_bases,
+    fetch_meter_forms,
+    fetch_meter_manufacturers,
+    fetch_meter_models,
+    fetch_meter_subtypes,
+    fetch_meter_types,
+    fetch_test_levels,
+    fetch_test_names,
+    fetch_test_types,
+    fetch_testers,
+)
 from db.queries import create_report, get_next_new_id
 from ui.detail_view import (
     AMR_FIELDS,
+    ENGINEERING_FIELDS,
+    FAILURE_FIELDS,
+    LARGE_MULTILINE_KEYS,
     METER_FIELDS,
     MULTILINE_KEYS,
     REVIEW_FIELDS,
-    TEST_FIELDS,
+    TEST_INFO_FIELDS,
 )
 
 
@@ -53,25 +72,31 @@ from ui.detail_view import (
 
 EUT_TYPE_OPTIONS = ["", "AMI", "Meter Only", "AMR Only", "OTHER EUT"]
 
-TEST_TYPE_OPTIONS = [
+# Static fallbacks used when the METER_SPECS DB is unavailable
+_FALLBACK_TEST_TYPES = [
     "", "EMC", "Reliability", "Functional", "Environmental",
-    "Accuracy", "Mechanical", "Safety", "All", "Custom", "Past Tests",
+    "Accuracy", "Mechanical", "Safety", "Custom", "Past Tests",
 ]
 
-METER_TYPE_OPTIONS = [
-    "", "Revelo", "S4X Gen 2", "FOCUS AXe", "MAXsys", "FOCUS AX", "S4X",
-    "S4X Gen 3", "FOCUS Axei", "FOCUS Axi", "FOCUS AX POLY", "FOCUS AL",
-    "S4e", "Residential", "FOCUS", "AXEi", "Load Control Switch",
-    "FOCUS AX EPS", "Focus Axe 8W", "DEV 2635", "PCB Board", "Prototype",
-    "NextGenMeter", "AXe", "FOCUS AXe Gen 2", "FOCUS RXRe", "E360",
-    "S4x RXR", "NA",
-]
-
-# DB keys → list of combo options (empty string = unset / blank)
-COMBO_OPTIONS: dict[str, list[str]] = {
-    "EUT_TYPE":   EUT_TYPE_OPTIONS,
-    "Test Type":  TEST_TYPE_OPTIONS,
-    "Meter Type": METER_TYPE_OPTIONS,
+# DB keys whose combo items are loaded from METER_SPECS at form-open time.
+# Value is a callable () -> list[str].  An empty string is prepended so the
+# field can be left blank, matching VB behaviour.
+_DB_COMBO_LOADERS: dict[str, callable] = {
+    "EUT_TYPE":              lambda: EUT_TYPE_OPTIONS,
+    "Test_Type":             lambda: [""] + (fetch_test_types() or _FALLBACK_TEST_TYPES[1:]),
+    "Level":                 lambda: [""] + fetch_test_levels(),
+    "Test":                  lambda: [""] + fetch_test_names(),
+    "Tested By":             lambda: [""] + fetch_testers(),
+    "Meter":                 lambda: [""] + fetch_meter_models(),
+    "Meter_Manufacturer":    lambda: [""] + fetch_meter_manufacturers(),
+    "Meter_Type":            lambda: [""] + fetch_meter_types(),
+    "Meter_SubType":         lambda: [""] + fetch_meter_subtypes(),
+    "Form":                  lambda: [""] + fetch_meter_forms(),
+    "Meter_Base":            lambda: [""] + fetch_meter_bases(),
+    "AMR":                   lambda: [""] + fetch_amr_models(),
+    "AMR_Manufacturer":      lambda: [""] + fetch_amr_manufacturers(),
+    "AMR_Type":              lambda: [""] + fetch_amr_types(),
+    "AMR_SUBType":           lambda: [""] + fetch_amr_subtypes(),
 }
 
 # DB keys that render as a NullableDateEdit
@@ -222,11 +247,13 @@ class NewReportDialog(QDialog):
         tabs = QTabWidget()
         root.addWidget(tabs)
 
-        tabs.addTab(self._build_form_tab(METER_FIELDS),  "Meter Info")
-        tabs.addTab(self._build_form_tab(AMR_FIELDS),    "AMR Info")
-        tabs.addTab(self._build_form_tab(TEST_FIELDS),   "Test && Failure")
-        tabs.addTab(self._build_form_tab(REVIEW_FIELDS), "Review && Approval")
-        tabs.addTab(self._build_attachments_tab(),       "Attachments")
+        tabs.addTab(self._build_form_tab(METER_FIELDS),        "Meter Info")
+        tabs.addTab(self._build_form_tab(AMR_FIELDS),          "AMR Info")
+        tabs.addTab(self._build_form_tab(TEST_INFO_FIELDS),    "Test Info")
+        tabs.addTab(self._build_form_tab(FAILURE_FIELDS),      "Failure")
+        tabs.addTab(self._build_form_tab(ENGINEERING_FIELDS),  "Engineering")
+        tabs.addTab(self._build_form_tab(REVIEW_FIELDS),       "Review && Approval")
+        tabs.addTab(self._build_attachments_tab(),             "Attachments")
 
     def _build_form_tab(self, field_defs: list[tuple[str, str]]) -> QScrollArea:
         """Build a scrollable QFormLayout tab for the given field definitions."""
@@ -258,9 +285,10 @@ class NewReportDialog(QDialog):
         return scroll
 
     def _make_field_widget(self, db_key: str) -> QWidget:
-        if db_key in COMBO_OPTIONS:
+        if db_key in _DB_COMBO_LOADERS:
             w = QComboBox()
-            w.addItems(COMBO_OPTIONS[db_key])
+            w.setEditable(True)   # mirrors VB: user can type a custom value
+            w.addItems(_DB_COMBO_LOADERS[db_key]())
             return w
         if db_key in DATE_KEYS:
             return NullableDateEdit()

@@ -50,6 +50,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from auth.session import current_user
 from db.queries import delete_report, fetch_all_reports, search_reports
 
 
@@ -273,12 +274,27 @@ class DashboardWindow(QMainWindow):
         root.setContentsMargins(12, 12, 12, 12)
 
         # ── Title bar ──────────────────────────────────────────────────
+        title_row = QHBoxLayout()
+
         title = QLabel("Failure Report Management System")
         title_font = QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
-        root.addWidget(title)
+        title_row.addWidget(title, stretch=1)
+
+        # Show logged-in user + access level on the right side of the title bar
+        user_text = (
+            f"{current_user.full_name}  [{current_user.access_level.name}]"
+            if current_user.is_logged_in
+            else "Not logged in"
+        )
+        self._user_label = QLabel(user_text)
+        self._user_label.setStyleSheet("color: #555; font-size: 9pt;")
+        self._user_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(self._user_label)
+
+        root.addLayout(title_row)
 
         # ── Separator ──────────────────────────────────────────────────
         sep = QFrame()
@@ -318,24 +334,41 @@ class DashboardWindow(QMainWindow):
         self._approved_combo.currentIndexChanged.connect(self._schedule_search)
         filter_bar.addWidget(self._approved_combo)
 
-        # New Report button (Ctrl+N)
+        # New Report button (Ctrl+N) — hidden for READ_ONLY / NO_ACCESS users
         self._new_report_btn = QPushButton("+ New Report")
         self._new_report_btn.setObjectName("new_report_btn")
         self._new_report_btn.setFixedWidth(100)
         self._new_report_btn.setShortcut(QKeySequence("Ctrl+N"))
         self._new_report_btn.setToolTip("Create a new failure report  (Ctrl+N)")
+        self._new_report_btn.setVisible(current_user.can_create)
         self._new_report_btn.clicked.connect(self.new_report_requested.emit)
         filter_bar.addWidget(self._new_report_btn)
 
-        # Delete button (Del key)
+        # Delete button (Del key) — ADMIN only (matches VB eAccessState.ADMIN gate)
         self._delete_btn = QPushButton("Delete")
         self._delete_btn.setObjectName("delete_btn")
         self._delete_btn.setFixedWidth(70)
         self._delete_btn.setShortcut(QKeySequence("Delete"))
         self._delete_btn.setToolTip("Delete selected report  (Del)")
         self._delete_btn.setEnabled(False)   # enabled only when a row is selected
+        self._delete_btn.setVisible(current_user.can_delete)
         self._delete_btn.clicked.connect(self._on_delete_clicked)
         filter_bar.addWidget(self._delete_btn)
+
+        # Advanced Filter button — opens FilterDialog (frmFilter.vb port)
+        self._adv_filter_btn = QPushButton("Advanced Filter")
+        self._adv_filter_btn.setObjectName("adv_filter_btn")
+        self._adv_filter_btn.setToolTip("Open the advanced filter dialog")
+        self._adv_filter_btn.clicked.connect(self._on_advanced_filter_clicked)
+        filter_bar.addWidget(self._adv_filter_btn)
+
+        # Clear Filter — only visible while an advanced filter is active
+        self._clear_filter_btn = QPushButton("Clear Filter")
+        self._clear_filter_btn.setObjectName("clear_filter_btn")
+        self._clear_filter_btn.setToolTip("Remove the active advanced filter and reload all reports")
+        self._clear_filter_btn.setVisible(False)
+        self._clear_filter_btn.clicked.connect(self._on_clear_filter_clicked)
+        filter_bar.addWidget(self._clear_filter_btn)
 
         # Refresh button (F5)
         self._refresh_btn = QPushButton("Refresh")
@@ -346,6 +379,9 @@ class DashboardWindow(QMainWindow):
         filter_bar.addWidget(self._refresh_btn)
 
         root.addLayout(filter_bar)
+
+        # Active advanced filter clause (empty string = no filter)
+        self._active_filter_clause: str = ""
 
         # ── Table ──────────────────────────────────────────────────────
         self._table = QTableView()
@@ -397,7 +433,12 @@ class DashboardWindow(QMainWindow):
         # ── Status bar ─────────────────────────────────────────────────
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-        self._status.showMessage("Loading…")
+        access_msg = (
+            f"Logged in as {current_user.full_name} ({current_user.access_level.name})  |  Loading…"
+            if current_user.is_logged_in
+            else "Loading…"
+        )
+        self._status.showMessage(access_msg)
 
     # ------------------------------------------------------------------
     # Column width persistence
@@ -417,6 +458,35 @@ class DashboardWindow(QMainWindow):
                     self._table.setColumnWidth(i, int(w))
                 except (ValueError, TypeError):
                     pass
+
+    # ------------------------------------------------------------------
+    # Advanced filter
+    # ------------------------------------------------------------------
+
+    def _on_advanced_filter_clicked(self):
+        from ui.filter_dialog import FilterDialog
+        dlg = FilterDialog(initial_clause=self._active_filter_clause, parent=self)
+        if dlg.exec() == FilterDialog.DialogCode.Accepted:
+            self._active_filter_clause = dlg.result_clause
+            rows = dlg.result_rows
+            self._model.load(rows)
+            self._proxy.sort(
+                self._table.horizontalHeader().sortIndicatorSection(),
+                self._table.horizontalHeader().sortIndicatorOrder(),
+            )
+            count = self._model.rowCount()
+            clause_summary = (
+                f"  |  Filter: {self._active_filter_clause[:60]}…"
+                if len(self._active_filter_clause) > 60
+                else (f"  |  Filter: {self._active_filter_clause}" if self._active_filter_clause else "")
+            )
+            self._status.showMessage(f"{count} report{'s' if count != 1 else ''} matched.{clause_summary}")
+            self._clear_filter_btn.setVisible(bool(self._active_filter_clause))
+
+    def _on_clear_filter_clicked(self):
+        self._active_filter_clause = ""
+        self._clear_filter_btn.setVisible(False)
+        self._load_all()
 
     # ------------------------------------------------------------------
     # Data loading

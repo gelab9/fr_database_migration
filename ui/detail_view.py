@@ -20,6 +20,7 @@ Day 3 changes
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFormLayout,
     QFrame,
@@ -36,7 +37,44 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from auth.session import current_user
+from db.lookup_queries import (
+    fetch_amr_models,
+    fetch_amr_manufacturers,
+    fetch_amr_subtypes,
+    fetch_amr_types,
+    fetch_meter_bases,
+    fetch_meter_forms,
+    fetch_meter_manufacturers,
+    fetch_meter_models,
+    fetch_meter_subtypes,
+    fetch_meter_types,
+    fetch_test_levels,
+    fetch_test_names,
+    fetch_test_types,
+    fetch_testers,
+)
 from db.queries import delete_report, fetch_attachments_by_new_id, fetch_report_by_id, update_report
+
+# DB keys whose edit-mode widget is an editable QComboBox populated from METER_SPECS.
+# Mirrors VB: combos allow free-text entry AND pre-defined lookup values.
+_COMBO_LOADERS: dict[str, callable] = {
+    "Test_Type":          lambda: [""] + (fetch_test_types() or []),
+    "Level":              lambda: [""] + fetch_test_levels(),
+    "Test":               lambda: [""] + fetch_test_names(),
+    "Tested By":          lambda: [""] + fetch_testers(),
+    "Meter":              lambda: [""] + fetch_meter_models(),
+    "Meter_Manufacturer": lambda: [""] + fetch_meter_manufacturers(),
+    "Meter_Type":         lambda: [""] + fetch_meter_types(),
+    "Meter_SubType":      lambda: [""] + fetch_meter_subtypes(),
+    "Form":               lambda: [""] + fetch_meter_forms(),
+    "Meter_Base":         lambda: [""] + fetch_meter_bases(),
+    "AMR":                lambda: [""] + fetch_amr_models(),
+    "AMR_Manufacturer":   lambda: [""] + fetch_amr_manufacturers(),
+    "AMR_Type":           lambda: [""] + fetch_amr_types(),
+    "AMR_SUBType":        lambda: [""] + fetch_amr_subtypes(),
+    "EUT_TYPE":           lambda: ["", "AMI", "Meter Only", "AMR Only", "OTHER EUT"],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +120,7 @@ AMR_FIELDS = [
     ("Voltage",         "AMR_Voltage"),
 ]
 
-TEST_FIELDS = [
+TEST_INFO_FIELDS = [
     ("Project",             "Project"),
     ("Project Number",      "Project_Number"),
     ("FW Ver",              "FW Ver"),
@@ -94,8 +132,14 @@ TEST_FIELDS = [
     ("Tested By",           "Tested By"),
     ("Assigned To",         "Assigned To"),
     ("Test Equipment ID",   "Test_Equipment_ID"),
+]
+
+FAILURE_FIELDS = [
     ("Failure Description", "Failure Description"),
     ("Corrective Action",   "Corrective Action"),
+]
+
+ENGINEERING_FIELDS = [
     ("Engineering Notes",   "Engineering Notes"),
 ]
 
@@ -130,6 +174,9 @@ MULTILINE_KEYS = {
     "Engineering Notes",
     "TCC Comments",
 }
+
+# These are the only field on their tab so they get extra vertical space
+LARGE_MULTILINE_KEYS = {"Failure Description", "Corrective Action", "Engineering Notes"}
 
 # Stylesheet applied to widgets in read-only mode to look like display labels
 _READONLY_STYLE = (
@@ -171,15 +218,15 @@ class DetailDialog(QDialog):
     save_requested = pyqtSignal(int, dict)
     report_deleted = pyqtSignal(int)
 
-    def __init__(self, index: int, parent=None):
+    def __init__(self, index: int, parent=None, prompt_before_saving: bool = True):
         super().__init__(parent)
         self._index = index
         self._editing = False
+        self._prompt_before_saving = prompt_before_saving
         # Maps db key → QWidget (QLineEdit or QTextEdit)
         self._field_widgets: dict[str, QWidget] = {}
 
         self.setWindowTitle("Failure Report Detail")
-        self.resize(860, 700)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
@@ -193,6 +240,7 @@ class DetailDialog(QDialog):
 
         self._build_ui()
         self._populate()
+        self.showMaximized()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -216,8 +264,10 @@ class DetailDialog(QDialog):
         )
         header_row.addWidget(self._title_label)
 
+        # Edit button — hidden for READ_ONLY / NO_ACCESS (matches VB access gating)
         self._edit_btn = QPushButton("Edit")
         self._edit_btn.setFixedWidth(70)
+        self._edit_btn.setVisible(current_user.can_edit)
         self._edit_btn.clicked.connect(self._on_edit_clicked)
         header_row.addWidget(self._edit_btn)
 
@@ -235,10 +285,12 @@ class DetailDialog(QDialog):
         self._pdf_btn.clicked.connect(self._on_export_pdf)
         header_row.addWidget(self._pdf_btn)
 
+        # Delete button — ADMIN only (matches VB eAccessState.ADMIN gate)
         self._delete_btn = QPushButton("Delete")
         self._delete_btn.setObjectName("delete_btn")
         self._delete_btn.setFixedWidth(70)
         self._delete_btn.setToolTip("Permanently delete this report")
+        self._delete_btn.setVisible(current_user.can_delete)
         self._delete_btn.clicked.connect(self._on_delete_clicked)
         header_row.addWidget(self._delete_btn)
 
@@ -260,11 +312,13 @@ class DetailDialog(QDialog):
         self._tabs = QTabWidget()
         root.addWidget(self._tabs)
 
-        self._tabs.addTab(self._build_form_tab(METER_FIELDS),  "Meter Info")
-        self._tabs.addTab(self._build_form_tab(AMR_FIELDS),    "AMR Info")
-        self._tabs.addTab(self._build_form_tab(TEST_FIELDS),   "Test && Failure")
-        self._tabs.addTab(self._build_form_tab(REVIEW_FIELDS), "Review && Approval")
-        self._tabs.addTab(self._build_attachments_tab(),       "Attachments")
+        self._tabs.addTab(self._build_form_tab(METER_FIELDS),        "Meter Info")
+        self._tabs.addTab(self._build_form_tab(AMR_FIELDS),          "AMR Info")
+        self._tabs.addTab(self._build_form_tab(TEST_INFO_FIELDS),    "Test Info")
+        self._tabs.addTab(self._build_form_tab(FAILURE_FIELDS),      "Failure")
+        self._tabs.addTab(self._build_form_tab(ENGINEERING_FIELDS),  "Engineering")
+        self._tabs.addTab(self._build_form_tab(REVIEW_FIELDS),       "Review && Approval")
+        self._tabs.addTab(self._build_attachments_tab(),             "Attachments")
 
         self.setStyleSheet(_READONLY_STYLE)
 
@@ -305,13 +359,19 @@ class DetailDialog(QDialog):
         if db_key in MULTILINE_KEYS:
             w = QTextEdit()
             w.setReadOnly(True)
-            w.setFixedHeight(90)
-            w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            w.setMinimumHeight(160 if db_key in LARGE_MULTILINE_KEYS else 80)
+            w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            w.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             return w
-        else:
-            w = QLineEdit()
-            w.setReadOnly(True)
+        if db_key in _COMBO_LOADERS:
+            w = QComboBox()
+            w.setEditable(True)   # mirrors VB: user may type a custom value
+            w.addItems(_COMBO_LOADERS[db_key]())
+            w.setEnabled(False)   # read-only until Edit is clicked
             return w
+        w = QLineEdit()
+        w.setReadOnly(True)
+        return w
 
     def _build_attachments_tab(self) -> QWidget:
         """Tab 5 — shows the Attachments field from the main table and
@@ -359,6 +419,12 @@ class DetailDialog(QDialog):
 
             if isinstance(widget, QTextEdit):
                 widget.setPlainText(text)
+            elif isinstance(widget, QComboBox):
+                idx = widget.findText(text)
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+                else:
+                    widget.setCurrentText(text)  # free-text value not in list
             else:
                 widget.setText(text)
 
@@ -398,6 +464,8 @@ class DetailDialog(QDialog):
         for db_key, widget in self._field_widgets.items():
             if isinstance(widget, QTextEdit):
                 widget.setReadOnly(not editable)
+            elif isinstance(widget, QComboBox):
+                widget.setEnabled(editable)
             elif isinstance(widget, QLineEdit):
                 widget.setReadOnly(not editable)
 
@@ -418,10 +486,24 @@ class DetailDialog(QDialog):
 
     def _on_save_clicked(self):
         """Collect all field values and emit save_requested."""
+        if self._prompt_before_saving:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Save",
+                "Save changes to this report?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         fields = {}
         for db_key, widget in self._field_widgets.items():
             if isinstance(widget, QTextEdit):
                 fields[db_key] = widget.toPlainText() or None
+            elif isinstance(widget, QComboBox):
+                text = widget.currentText().strip()
+                fields[db_key] = text or None
             elif isinstance(widget, QLineEdit):
                 text = widget.text().strip()
                 fields[db_key] = text or None
@@ -546,7 +628,9 @@ class DetailDialog(QDialog):
         all_tabs = [
             ("Meter Info",        METER_FIELDS),
             ("AMR Info",          AMR_FIELDS),
-            ("Test & Failure",    TEST_FIELDS),
+            ("Test Info",         TEST_INFO_FIELDS),
+            ("Failure",           FAILURE_FIELDS),
+            ("Engineering",       ENGINEERING_FIELDS),
             ("Review & Approval", REVIEW_FIELDS),
         ]
 
@@ -616,7 +700,7 @@ class DetailDialog(QDialog):
 # Wire detail view into the dashboard (helper used by main.py)
 # ---------------------------------------------------------------------------
 
-def open_detail(index: int, parent=None, on_deleted=None):
+def open_detail(index: int, parent=None, on_deleted=None, prompt_before_saving: bool = True):
     """
     Create a DetailDialog, wire save_requested → update_report, and exec.
 
@@ -625,8 +709,10 @@ def open_detail(index: int, parent=None, on_deleted=None):
     on_deleted : callable | None
         Optional zero-argument callback invoked if the report is deleted
         inside the dialog (so the caller can refresh its list).
+    prompt_before_saving : bool
+        When True, a confirmation dialog is shown before saving.
     """
-    dlg = DetailDialog(index, parent=parent)
+    dlg = DetailDialog(index, parent=parent, prompt_before_saving=prompt_before_saving)
 
     def _on_save(idx: int, fields: dict):
         success = update_report(idx, fields)

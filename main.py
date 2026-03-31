@@ -7,10 +7,12 @@ Run from the project root:
 
 import sys
 from pathlib import Path
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from ui.dashboard import DashboardWindow
 from ui.detail_view import open_detail
 from ui.new_report import open_new_report
+from ui.login import run_login
+from auth.session import current_user
 
 
 def _load_stylesheet(app: QApplication) -> None:
@@ -24,8 +26,12 @@ def _load_stylesheet(app: QApplication) -> None:
 
 def main():
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")   # Fusion gives QSS the cleanest baseline on all platforms
+    app.setStyle("Fusion")
     _load_stylesheet(app)
+
+    # Show login dialog before anything else — mirrors frmLogin splash on startup
+    if not run_login():
+        sys.exit(0)
 
     win = DashboardWindow()
 
@@ -34,6 +40,13 @@ def main():
     )
 
     def _on_new_report():
+        if not current_user.can_create:
+            QMessageBox.warning(
+                win,
+                "Access Denied",
+                "Your account does not have permission to create new reports.",
+            )
+            return
         dlg = open_new_report(parent=win)
         if dlg.result() == dlg.DialogCode.Accepted:
             win._load_all()
