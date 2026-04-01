@@ -222,6 +222,7 @@ class NewReportDialog(QDialog):
         header_row.addWidget(new_id_label)
 
         self._save_btn = QPushButton("Save")
+        self._save_btn.setObjectName("save_btn")
         self._save_btn.setFixedWidth(70)
         self._save_btn.setShortcut(QKeySequence("Ctrl+S"))
         self._save_btn.setToolTip("Save this report  (Ctrl+S)")
@@ -229,6 +230,7 @@ class NewReportDialog(QDialog):
         header_row.addWidget(self._save_btn)
 
         cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("cancel_btn")
         cancel_btn.setFixedWidth(70)
         cancel_btn.clicked.connect(self.reject)
         header_row.addWidget(cancel_btn)

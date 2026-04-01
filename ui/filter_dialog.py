@@ -57,7 +57,7 @@ _GENERAL_FIELDS: list[tuple[str, str]] = [
     ("Test Level",     "Level"),
     ("Project Name",   "PROJECT"),
     ("Project Number", "Project_Number"),
-    ("Assigned To",    "Assigned To"),
+    ("Project Lead",   "Assigned To"),
     ("Corrected By",   "Corrected By"),
     ("Approved By",    "Approved By"),
 ]

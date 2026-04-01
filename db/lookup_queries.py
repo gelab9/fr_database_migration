@@ -478,6 +478,95 @@ def fetch_approvers_by_discipline(discipline_name: str) -> list[str]:
     return [str(r[0]).strip() for r in rows if r[0]]
 
 
+def fetch_all_users() -> list[dict]:
+    """Return all USERS rows ordered by LastName for the Manage Users admin dialog."""
+    conn = get_meter_specs_connection()
+    if conn is None:
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT [ID], [username], [FirstName], [LastName], [AccessLevel], "
+            "[Active], [email] FROM [USERS] ORDER BY [LastName], [FirstName]"
+        )
+        return _rows_to_dicts(cursor, cursor.fetchall())
+    except pyodbc.Error as e:
+        print(f"fetch_all_users error: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def set_user_active(user_id: int, active: bool) -> bool:
+    """Enable or disable a user account (ADMIN only)."""
+    conn = get_meter_specs_connection()
+    if conn is None:
+        return False
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE [USERS] SET [Active] = ? WHERE [ID] = ?",
+            (1 if active else 0, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except pyodbc.Error as e:
+        print(f"set_user_active error: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def create_user(username: str, first_name: str, last_name: str,
+                access_level: int, email: str = "") -> bool:
+    """Insert a new USERS row. Password is blank; user must reset on first login."""
+    conn = get_meter_specs_connection()
+    if conn is None:
+        return False
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO [USERS] ([username],[password],[FirstName],[LastName],"
+            "[AccessLevel],[Active],[PassWordIsReset],[email]) "
+            "VALUES (?,?,?,?,?,1,1,?)",
+            (username.strip(), "", first_name.strip(), last_name.strip(),
+             access_level, email.strip()),
+        )
+        conn.commit()
+        return True
+    except pyodbc.Error as e:
+        print(f"create_user error: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def update_user(user_id: int, first_name: str, last_name: str,
+                access_level: int, email: str) -> bool:
+    """Update editable fields on a USERS row (ADMIN only)."""
+    conn = get_meter_specs_connection()
+    if conn is None:
+        return False
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE [USERS] SET [FirstName]=?, [LastName]=?, "
+            "[AccessLevel]=?, [email]=? WHERE [ID]=?",
+            (first_name.strip(), last_name.strip(), access_level,
+             email.strip(), user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except pyodbc.Error as e:
+        print(f"update_user error: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
 def fetch_active_usernames() -> list[str]:
     rows = _run(
         "SELECT [USERNAME] FROM [USERS] WHERE [ACTIVE] = 1 ORDER BY [USERNAME]"

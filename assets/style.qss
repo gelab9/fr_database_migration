@@ -1,67 +1,215 @@
 /* FR Database — Application Stylesheet */
 
+/* ── Shared button base ──────────────────────────────────────────────── */
+QPushButton {
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 9pt;
+}
+
+/* ── Generic outline button (Edit, Cancel, Close, etc.) ────────────── */
+QPushButton#outline_btn,
+QPushButton#cancel_btn,
+QPushButton#close_btn,
+QPushButton#edit_btn {
+    background-color: #ffffff;
+    color: #2c3e50;
+    border: 1.5px solid #9baab8;
+    border-radius: 4px;
+}
+QPushButton#outline_btn:hover,
+QPushButton#cancel_btn:hover,
+QPushButton#close_btn:hover,
+QPushButton#edit_btn:hover {
+    background-color: #edf2f7;
+    border-color: #4a90d9;
+    color: #1a5276;
+}
+QPushButton#outline_btn:pressed,
+QPushButton#cancel_btn:pressed,
+QPushButton#close_btn:pressed,
+QPushButton#edit_btn:pressed {
+    background-color: #d8e8f5;
+    border-color: #2d6ab8;
+}
+
+/* ── Named action buttons ───────────────────────────────────────────── */
 QPushButton#new_report_btn {
     background-color: #4a90d9;
     color: white;
     border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
     font-weight: bold;
 }
-
-QPushButton#new_report_btn:hover {
-    background-color: #3a7bc8;
-}
-
-QPushButton#new_report_btn:pressed {
-    background-color: #2d6ab8;
-}
+QPushButton#new_report_btn:hover   { background-color: #3a7bc8; }
+QPushButton#new_report_btn:pressed { background-color: #2d6ab8; }
 
 QPushButton#delete_btn {
     background-color: #d9534f;
     color: white;
     border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
 }
-
-QPushButton#delete_btn:hover {
-    background-color: #c9302c;
-}
-
-QPushButton#delete_btn:pressed {
-    background-color: #ac2925;
-}
+QPushButton#delete_btn:hover   { background-color: #c9302c; }
+QPushButton#delete_btn:pressed { background-color: #ac2925; }
 
 QPushButton#save_btn {
     background-color: #5cb85c;
     color: white;
     border: none;
-    border-radius: 4px;
-    padding: 4px 8px;
     font-weight: bold;
 }
-
-QPushButton#save_btn:hover {
-    background-color: #4cae4c;
-}
-
-QPushButton#save_btn:pressed {
-    background-color: #398439;
-}
+QPushButton#save_btn:hover   { background-color: #4cae4c; }
+QPushButton#save_btn:pressed { background-color: #398439; }
 
 QPushButton#pdf_btn {
     background-color: #f0ad4e;
     color: white;
     border: none;
+}
+QPushButton#pdf_btn:hover   { background-color: #ec971f; }
+QPushButton#pdf_btn:pressed { background-color: #d58512; }
+
+QPushButton#submit_review_btn {
+    background-color: #5b9ecf;
+    color: white;
+    border: none;
+    font-weight: bold;
+}
+QPushButton#submit_review_btn:hover   { background-color: #4a8bbf; }
+QPushButton#submit_review_btn:pressed { background-color: #3878ae; }
+
+QPushButton#adv_filter_btn {
+    background-color: #7c6fac;
+    color: white;
+    border: none;
+}
+QPushButton#adv_filter_btn:hover   { background-color: #6c5f9c; }
+QPushButton#adv_filter_btn:pressed { background-color: #5c4f8c; }
+
+QPushButton#clear_filter_btn {
+    background-color: #aaa;
+    color: white;
+    border: none;
+}
+QPushButton#clear_filter_btn:hover   { background-color: #888; }
+QPushButton#clear_filter_btn:pressed { background-color: #666; }
+
+QPushButton#admin_btn {
+    background-color: #e67e22;
+    color: white;
+    border: none;
+}
+QPushButton#admin_btn:hover   { background-color: #d35400; }
+QPushButton#admin_btn:pressed { background-color: #b44600; }
+
+QPushButton#equip_btn {
+    background-color: #27ae60;
+    color: white;
+    border: none;
+}
+QPushButton#equip_btn:hover   { background-color: #219a52; }
+QPushButton#equip_btn:pressed { background-color: #1a7a42; }
+
+/* ── Navigation bar buttons ────────────────────────────────────────── */
+QPushButton#nav_btn {
+    background-color: #ecf0f1;
+    color: #2c3e50;
+    border: 1px solid #bdc3c7;
+    border-radius: 3px;
+    font-size: 11pt;
+    padding: 2px 8px;
+    min-width: 30px;
+}
+QPushButton#nav_btn:hover   { background-color: #d5dde0; border-color: #9ba6ab; }
+QPushButton#nav_btn:pressed { background-color: #c0ccd1; }
+QPushButton#nav_btn:disabled { color: #bbb; background-color: #f4f6f7; border-color: #dde; }
+
+QLabel#nav_label {
+    font-size: 9pt;
+    color: #555;
+    padding: 0 6px;
+}
+
+/* ── Report header panel ───────────────────────────────────────────── */
+QFrame#report_header_panel {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
     border-radius: 4px;
-    padding: 4px 8px;
 }
 
-QPushButton#pdf_btn:hover {
-    background-color: #ec971f;
+/* ── Approval sidebar ──────────────────────────────────────────────── */
+QWidget#approval_sidebar {
+    background-color: #f0f4f8;
+    border-right: 1px solid #ccd5de;
 }
 
-QPushButton#pdf_btn:pressed {
-    background-color: #d58512;
+QLabel#sidebar_section_header {
+    color: #2c3e50;
+    font-size: 9pt;
+    padding-top: 4px;
+}
+
+/* ── Tab widget ────────────────────────────────────────────────────── */
+QTabWidget#report_tabs::pane {
+    border: 1px solid #c8d0d8;
+    border-radius: 0 4px 4px 4px;
+    background: white;
+}
+
+QTabWidget#report_tabs QTabBar::tab {
+    background: #e8ecf0;
+    color: #444;
+    border: 1px solid #c8d0d8;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    padding: 5px 12px;
+    font-size: 9pt;
+    min-width: 90px;
+}
+
+QTabWidget#report_tabs QTabBar::tab:selected {
+    background: white;
+    color: #1a5276;
+    font-weight: bold;
+    border-bottom: 2px solid #4a90d9;
+}
+
+QTabWidget#report_tabs QTabBar::tab:hover:!selected {
+    background: #d8dfe8;
+}
+
+/* ── Main vertical splitter handle ────────────────────────────────── */
+QSplitter#main_splitter::handle {
+    background-color: #c8d0d8;
+    height: 5px;
+}
+QSplitter#main_splitter::handle:hover {
+    background-color: #4a90d9;
+}
+
+/* ── Empty detail label ────────────────────────────────────────────── */
+QLabel#empty_detail_label {
+    color: #aab;
+    font-size: 11pt;
+    font-style: italic;
+}
+
+/* ── Table alternating rows ────────────────────────────────────────── */
+QTableView {
+    gridline-color: #dde;
+    selection-background-color: #4a90d9;
+    selection-color: white;
+    font-size: 9pt;
+}
+
+QHeaderView::section {
+    background-color: #2c3e50;
+    color: white;
+    padding: 5px 6px;
+    border: none;
+    border-right: 1px solid #3d5166;
+    font-size: 9pt;
+    font-weight: bold;
+}
+QHeaderView::section:hover {
+    background-color: #3d5166;
 }
