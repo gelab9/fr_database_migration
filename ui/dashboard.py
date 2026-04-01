@@ -380,6 +380,14 @@ class DashboardWindow(QMainWindow):
         self._clear_filter_btn.clicked.connect(self._on_clear_filter_clicked)
         filter_bar.addWidget(self._clear_filter_btn)
 
+        # Admin button — ADMIN only: manage lookup tables
+        if current_user.access_level >= AccessLevel.ADMIN:
+            self._admin_btn = QPushButton("Admin")
+            self._admin_btn.setObjectName("admin_btn")
+            self._admin_btn.setToolTip("Manage lookup table values (ADMIN only)")
+            self._admin_btn.clicked.connect(self._on_admin_clicked)
+            filter_bar.addWidget(self._admin_btn)
+
         # Test Equipment button — opens equipment management (POWER+ users)
         if current_user.access_level >= AccessLevel.CREATE_NEW:
             self._equip_btn = QPushButton("Test Equipment")
@@ -480,6 +488,10 @@ class DashboardWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Test Equipment
     # ------------------------------------------------------------------
+
+    def _on_admin_clicked(self):
+        from ui.manage_lookups import open_manage_lookups
+        open_manage_lookups(parent=self)
 
     def _on_test_equipment_clicked(self):
         from ui.test_equipment import open_test_equipment

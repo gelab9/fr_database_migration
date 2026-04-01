@@ -540,3 +540,89 @@ def fetch_attachments_by_new_id(new_id: int) -> list[dict]:
         return []
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Fetch attachment binary blob
+# ---------------------------------------------------------------------------
+
+def fetch_attachment_blob(attachment_id: int) -> bytes | None:
+    """
+    Return the raw varbinary bytes for a single ATTACHMENT row.
+    Returns None on error or not found.
+    """
+    sql = "SELECT [ATTACHMENT] FROM [ATTACHMENT] WHERE [ID] = ?"
+    conn = get_connection()
+    if conn is None:
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (attachment_id,))
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return bytes(row[0])
+        return None
+    except pyodbc.Error as e:
+        print(f"fetch_attachment_blob error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Insert attachment
+# ---------------------------------------------------------------------------
+
+def insert_attachment(fr_id: int, data: bytes) -> int | None:
+    """
+    Insert a new row into the ATTACHMENT table.
+    Returns the new [ID] identity value, or None on failure.
+    """
+    sql = "INSERT INTO [ATTACHMENT] ([FR_ID], [ATTACHMENT]) VALUES (?, ?)"
+    conn = get_connection()
+    if conn is None:
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (fr_id, pyodbc.Binary(data)))
+        cursor.execute("SELECT SCOPE_IDENTITY()")
+        row = cursor.fetchone()
+        new_id = int(row[0]) if row and row[0] is not None else None
+        if new_id is None:
+            cursor.execute("SELECT @@IDENTITY")
+            row = cursor.fetchone()
+            new_id = int(row[0]) if row and row[0] is not None else None
+        conn.commit()
+        return new_id
+    except pyodbc.Error as e:
+        print(f"insert_attachment error: {e}")
+        conn.rollback()
+        return None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Delete attachment
+# ---------------------------------------------------------------------------
+
+def delete_attachment_by_id(attachment_id: int) -> bool:
+    """
+    Hard-delete a single ATTACHMENT row by its [ID] primary key.
+    Returns True if a row was deleted.
+    """
+    sql = "DELETE FROM [ATTACHMENT] WHERE [ID] = ?"
+    conn = get_connection()
+    if conn is None:
+        return False
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, (attachment_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except pyodbc.Error as e:
+        print(f"delete_attachment_by_id error: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()

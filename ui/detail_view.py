@@ -23,11 +23,13 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -56,7 +58,18 @@ from db.lookup_queries import (
     fetch_test_types,
     fetch_testers,
 )
-from db.queries import delete_report, fetch_attachments_by_new_id, fetch_report_by_id, update_report
+import os
+import tempfile
+
+from db.queries import (
+    delete_attachment_by_id,
+    delete_report,
+    fetch_attachment_blob,
+    fetch_attachments_by_new_id,
+    fetch_report_by_id,
+    insert_attachment,
+    update_report,
+)
 
 # DB keys whose edit-mode widget is an editable QComboBox populated from METER_SPECS.
 # Mirrors VB: combos allow free-text entry AND pre-defined lookup values.
@@ -445,29 +458,86 @@ class DetailDialog(QDialog):
         return w
 
     def _build_attachments_tab(self) -> QWidget:
-        """Tab 5 — shows the Attachments field from the main table and
-        the count of rows in the ATTACHMENT table for this report."""
+        """
+        Tab 5 — Attachment management.
+
+        Section 1: Legacy UNC path (ATTACHMENTS column on the main report row).
+                   Read-only display + "Open Folder" button for VB-era ZIP archives.
+
+        Section 2: Binary attachments stored in the ATTACHMENT table (varbinary MAX).
+                   Upload, Download/Open, and Delete (POWER+) actions.
+        """
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
 
-        # Inline attachments field (from the main table)
-        inline_label = QLabel("Attachments field (from report):")
-        inline_label.setFont(QFont("", -1, QFont.Weight.Bold))
-        layout.addWidget(inline_label)
+        # ── Section 1: Legacy UNC path ────────────────────────────────────
+        unc_lbl = QLabel("Legacy attachment path (VB/ZIP archive):")
+        unc_lbl.setFont(QFont("", -1, QFont.Weight.Bold))
+        layout.addWidget(unc_lbl)
 
-        self._attachments_field = QTextEdit()
+        unc_row = QHBoxLayout()
+        self._attachments_field = QLineEdit()
         self._attachments_field.setReadOnly(True)
-        self._attachments_field.setFixedHeight(80)
-        layout.addWidget(self._attachments_field)
+        self._attachments_field.setPlaceholderText("No legacy UNC path stored")
+        unc_row.addWidget(self._attachments_field, stretch=1)
 
-        # ATTACHMENT table rows
-        self._attachment_info = QLabel()
-        self._attachment_info.setWordWrap(True)
-        layout.addWidget(self._attachment_info)
+        self._open_folder_btn = QPushButton("Open Folder")
+        self._open_folder_btn.setFixedWidth(100)
+        self._open_folder_btn.setEnabled(False)
+        self._open_folder_btn.setToolTip("Open the folder containing the legacy ZIP archive")
+        self._open_folder_btn.clicked.connect(self._on_open_unc_folder)
+        unc_row.addWidget(self._open_folder_btn)
+        layout.addLayout(unc_row)
 
-        layout.addStretch()
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep)
+
+        # ── Section 2: Binary attachments ────────────────────────────────
+        bin_lbl = QLabel("File attachments:")
+        bin_lbl.setFont(QFont("", -1, QFont.Weight.Bold))
+        layout.addWidget(bin_lbl)
+
+        self._attachment_list = QListWidget()
+        self._attachment_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._attachment_list.setMinimumHeight(140)
+        self._attachment_list.itemSelectionChanged.connect(self._on_attachment_selection_changed)
+        layout.addWidget(self._attachment_list, stretch=1)
+
+        att_btn_row = QHBoxLayout()
+        att_btn_row.setSpacing(8)
+
+        self._upload_btn = QPushButton("Upload File…")
+        self._upload_btn.setToolTip("Attach a file to this report (stored in database)")
+        self._upload_btn.clicked.connect(self._on_upload_attachment)
+        att_btn_row.addWidget(self._upload_btn)
+
+        self._download_btn = QPushButton("Open / Download")
+        self._download_btn.setEnabled(False)
+        self._download_btn.setToolTip("Save selected attachment to a temp file and open it")
+        self._download_btn.clicked.connect(self._on_download_attachment)
+        att_btn_row.addWidget(self._download_btn)
+
+        self._delete_att_btn = QPushButton("Delete")
+        self._delete_att_btn.setEnabled(False)
+        self._delete_att_btn.setToolTip("Permanently delete selected attachment (POWER users only)")
+        self._delete_att_btn.clicked.connect(self._on_delete_attachment)
+        att_btn_row.addWidget(self._delete_att_btn)
+
+        att_btn_row.addStretch()
+        layout.addLayout(att_btn_row)
+
+        # Hide upload/delete for read-only users; will be refreshed in _populate
+        self._upload_btn.setVisible(
+            current_user.access_level.value >= AccessLevel.CREATE_NEW.value
+        )
+        self._delete_att_btn.setVisible(
+            current_user.access_level.value >= AccessLevel.POWER.value
+        )
+
         return container
 
     # ------------------------------------------------------------------
@@ -501,30 +571,139 @@ class DetailDialog(QDialog):
             else:
                 widget.setText(text)
 
-        # Attachments tab
+        # Attachments tab — legacy UNC path
         inline_val = self._report.get("Attachments")
-        self._attachments_field.setPlainText(
-            "" if inline_val is None else str(inline_val)
-        )
+        unc_path = "" if inline_val is None else str(inline_val).strip()
+        self._attachments_field.setText(unc_path)
+        self._open_folder_btn.setEnabled(bool(unc_path))
 
-        new_id_val = self._report.get("New ID")
-        if new_id_val is not None:
-            try:
-                rows = fetch_attachments_by_new_id(int(new_id_val))
-                if rows:
-                    self._attachment_info.setText(
-                        f"{len(rows)} attachment record(s) found in the ATTACHMENT table "
-                        f"for New ID {new_id_val}."
-                    )
-                else:
-                    self._attachment_info.setText(
-                        f"No attachment records found in the ATTACHMENT table "
-                        f"for New ID {new_id_val}."
-                    )
-            except Exception as e:
-                self._attachment_info.setText(f"Error querying attachments: {e}")
+        # Attachments tab — binary attachment list
+        self._refresh_attachment_list()
+
+    # ------------------------------------------------------------------
+    # Attachment helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_attachment_list(self):
+        """Reload the ATTACHMENT table list for the current report."""
+        self._attachment_list.clear()
+        new_id_val = self._report.get("New ID") if self._report else None
+        if new_id_val is None:
+            return
+        try:
+            rows = fetch_attachments_by_new_id(int(new_id_val))
+            for row in rows:
+                att_id = row.get("ID")
+                item_text = f"Attachment #{att_id}"
+                self._attachment_list.addItem(item_text)
+                # Store the DB ID in the item's user data
+                item = self._attachment_list.item(self._attachment_list.count() - 1)
+                item.setData(Qt.ItemDataRole.UserRole, att_id)
+        except Exception as e:
+            print(f"_refresh_attachment_list error: {e}")
+        self._on_attachment_selection_changed()
+
+    def _on_attachment_selection_changed(self):
+        has_sel = self._attachment_list.currentItem() is not None
+        self._download_btn.setEnabled(has_sel)
+        if current_user.access_level.value >= AccessLevel.POWER.value:
+            self._delete_att_btn.setEnabled(has_sel)
+
+    def _selected_attachment_id(self) -> int | None:
+        item = self._attachment_list.currentItem()
+        if item is None:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def _on_open_unc_folder(self):
+        """Open Explorer to the folder containing the legacy UNC path."""
+        path = self._attachments_field.text().strip()
+        if not path:
+            return
+        folder = os.path.dirname(path) if os.path.splitext(path)[1] else path
+        try:
+            os.startfile(folder)
+        except Exception as e:
+            QMessageBox.warning(self, "Cannot Open Folder",
+                                f"Could not open folder:\n{folder}\n\n{e}")
+
+    def _on_upload_attachment(self):
+        """Choose a file and store it as varbinary in the ATTACHMENT table."""
+        new_id_val = self._report.get("New ID") if self._report else None
+        if new_id_val is None:
+            QMessageBox.warning(self, "Upload", "Report must be saved before uploading attachments.")
+            return
+
+        path, _ = QFileDialog.getOpenFileName(self, "Select File to Attach")
+        if not path:
+            return
+
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError as e:
+            QMessageBox.critical(self, "Upload Failed", f"Could not read file:\n{e}")
+            return
+
+        new_att_id = insert_attachment(int(new_id_val), data)
+        if new_att_id is None:
+            QMessageBox.critical(self, "Upload Failed",
+                                 "Database insert failed — check console for details.")
+            return
+
+        self._refresh_attachment_list()
+        # Select the newly uploaded item
+        for i in range(self._attachment_list.count()):
+            item = self._attachment_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == new_att_id:
+                self._attachment_list.setCurrentItem(item)
+                break
+
+    def _on_download_attachment(self):
+        """Fetch binary blob and open it via the OS default application."""
+        att_id = self._selected_attachment_id()
+        if att_id is None:
+            return
+
+        data = fetch_attachment_blob(att_id)
+        if data is None:
+            QMessageBox.critical(self, "Download Failed",
+                                 "Could not retrieve attachment data — check console for details.")
+            return
+
+        # Write to a named temp file; keep suffix generic since we have no filename
+        suffix = f"_attachment_{att_id}.bin"
+        try:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(data)
+            tmp.close()
+            os.startfile(tmp.name)
+        except Exception as e:
+            QMessageBox.critical(self, "Open Failed",
+                                 f"Could not open attachment:\n{e}")
+
+    def _on_delete_attachment(self):
+        """Permanently delete the selected attachment after confirmation."""
+        att_id = self._selected_attachment_id()
+        if att_id is None:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Delete Attachment",
+            f"Permanently delete Attachment #{att_id}?\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        ok = delete_attachment_by_id(att_id)
+        if ok:
+            self._refresh_attachment_list()
         else:
-            self._attachment_info.setText("Unable to query attachments — New ID not set.")
+            QMessageBox.critical(self, "Delete Failed",
+                                 "Could not delete attachment — check console for details.")
 
     # ------------------------------------------------------------------
     # Edit / save toggle
