@@ -46,6 +46,43 @@ def _rows_to_dicts(cursor, rows):
 
 
 # ---------------------------------------------------------------------------
+# Connection diagnostics
+# ---------------------------------------------------------------------------
+
+def get_connection_info() -> dict:
+    """
+    Return the actual server name, database name, and connection string in use.
+    Runs SELECT @@SERVERNAME, DB_NAME() so we see what SQL Server resolved to,
+    not just what we passed in the connection string.
+    """
+    from config.settings import CONNECTION_STRING, SERVER, DATABASE
+    result = {
+        "config_server": SERVER,
+        "config_database": DATABASE,
+        "connection_string": CONNECTION_STRING,
+        "actual_server": None,
+        "actual_database": None,
+        "error": None,
+    }
+    conn = get_connection()
+    if conn is None:
+        result["error"] = "Connection failed"
+        return result
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT @@SERVERNAME, DB_NAME()")
+        row = cursor.fetchone()
+        if row:
+            result["actual_server"]   = str(row[0]) if row[0] else "(null)"
+            result["actual_database"] = str(row[1]) if row[1] else "(null)"
+    except pyodbc.Error as e:
+        result["error"] = str(e)
+    finally:
+        conn.close()
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Fetch all reports (summary columns only, ordered by [New ID])
 # ---------------------------------------------------------------------------
 

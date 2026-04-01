@@ -333,7 +333,17 @@ class NewReportDialog(QDialog):
         All other keys with no value (empty string / null date) are omitted
         so SQL Server can apply column defaults instead of inserting NULL.
         """
-        fields: dict = {"New ID": self._next_new_id}
+        # Always seed these boolean fields so the VB app's open-report filter
+        # (WHERE [FR_Approved] <> 'Checked') and Python's open_only filter both
+        # see new reports correctly.  NULL is treated as neither Checked nor
+        # Unchecked by SQL Server comparison, so rows would disappear from both
+        # "open" and "closed" views if left NULL.
+        fields: dict = {
+            "New ID":      self._next_new_id,
+            "Pass":        "Unchecked",
+            "FR_Approved": "Unchecked",
+            "Anomaly":     "Unchecked",
+        }
 
         for db_key, widget in self._field_widgets.items():
             if isinstance(widget, QComboBox):

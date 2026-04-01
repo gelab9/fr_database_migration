@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
 )
 
 from auth.session import AccessLevel, current_user
-from db.queries import delete_report, fetch_all_reports, search_reports
+from db.queries import delete_report, fetch_all_reports, get_connection_info, search_reports
 
 
 # ---------------------------------------------------------------------------
@@ -539,9 +539,13 @@ class DashboardWindow(QMainWindow):
         self._proxy.sort(COL_NEW_ID, Qt.SortOrder.AscendingOrder)
         count = self._model.rowCount()
         ts = QDateTime.currentDateTime().toString("h:mm:ss AP")
+        info = get_connection_info()
+        server_label = info.get("actual_server") or info.get("config_server") or "?"
+        db_label     = info.get("actual_database") or info.get("config_database") or "?"
         self._status.showMessage(
             f"{count} report{'s' if count != 1 else ''} loaded.  |  "
-            f"Last refreshed: {ts}  |  Auto-refresh: {AUTO_REFRESH_INTERVAL_MS // 1000}s"
+            f"Last refreshed: {ts}  |  Auto-refresh: {AUTO_REFRESH_INTERVAL_MS // 1000}s  |  "
+            f"Server: {server_label}  DB: {db_label}"
         )
 
     def _on_auto_refresh(self):
