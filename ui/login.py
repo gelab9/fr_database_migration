@@ -286,12 +286,14 @@ class LoginDialog(QDialog):
         btn_row.setSpacing(8)
 
         self._login_btn = QPushButton("Log In")
+        self._login_btn.setObjectName("save_btn")
         self._login_btn.setDefault(True)
         self._login_btn.setShortcut(QKeySequence("Return"))
         self._login_btn.clicked.connect(self._on_login)
         btn_row.addWidget(self._login_btn)
 
         browse_btn = QPushButton("Browse (Read Only)")
+        browse_btn.setObjectName("outline_btn")
         browse_btn.setToolTip("Open in read-only mode without logging in")
         browse_btn.clicked.connect(self._on_browse)
         btn_row.addWidget(browse_btn)
@@ -299,6 +301,7 @@ class LoginDialog(QDialog):
         root.addLayout(btn_row)
 
         cancel_btn = QPushButton("Exit")
+        cancel_btn.setObjectName("cancel_btn")
         cancel_btn.clicked.connect(self.reject)
         root.addWidget(cancel_btn)
 

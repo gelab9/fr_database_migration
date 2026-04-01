@@ -53,7 +53,7 @@ from db.lookup_queries import (
     fetch_test_types,
     fetch_testers,
 )
-from db.queries import create_report, get_next_new_id
+from db.queries import create_report, fetch_distinct_column_values, get_next_new_id
 from ui.detail_view import (
     AMR_FIELDS,
     ENGINEERING_FIELDS,
@@ -83,10 +83,15 @@ _FALLBACK_TEST_TYPES = [
 # field can be left blank, matching VB behaviour.
 _DB_COMBO_LOADERS: dict[str, callable] = {
     "EUT_TYPE":              lambda: EUT_TYPE_OPTIONS,
+    "Project_Number":        lambda: [""] + [
+                                 "N/A" if v.strip().lower() == "na" else v
+                                 for v in fetch_distinct_column_values("Project_Number")
+                             ],
     "Test_Type":             lambda: [""] + (fetch_test_types() or _FALLBACK_TEST_TYPES[1:]),
     "Level":                 lambda: [""] + fetch_test_levels(),
     "Test":                  lambda: [""] + fetch_test_names(),
     "Tested By":             lambda: [""] + fetch_testers(),
+    "Assigned To":           lambda: [""] + fetch_testers(),
     "Meter":                 lambda: [""] + fetch_meter_models(),
     "Meter_Manufacturer":    lambda: [""] + fetch_meter_manufacturers(),
     "Meter_Type":            lambda: [""] + fetch_meter_types(),
@@ -131,10 +136,10 @@ class NullableDateEdit(QWidget):
 
         self._date_edit = QDateEdit()
         self._date_edit.setCalendarPopup(True)
-        self._date_edit.setDisplayFormat("yyyy-MM-dd")
+        self._date_edit.setDisplayFormat("MM/dd/yyyy")
         self._date_edit.setMinimumDate(self._NULL_DATE)
         self._date_edit.setSpecialValueText("(none)")
-        self._date_edit.setDate(self._NULL_DATE)   # start blank
+        self._date_edit.setDate(QDate.currentDate())   # default to today
         layout.addWidget(self._date_edit, stretch=1)
 
         self._clear_btn = QPushButton("✕")

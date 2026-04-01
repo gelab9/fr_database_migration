@@ -101,12 +101,19 @@ def fetch_amr_manufacturers(active_only: bool = True) -> list[str]:
     return [str(r[0]).strip() for r in rows if r[0]]
 
 
+def _sort_na_last(items: list[str]) -> list[str]:
+    """Sort alphabetically with any 'N/A' entry forced to the end."""
+    na = [v for v in items if v.upper() == "N/A"]
+    rest = sorted(v for v in items if v.upper() != "N/A")
+    return rest + na
+
+
 def fetch_amr_types(active_only: bool = True) -> list[str]:
     where = "WHERE [ACTIVE] = 1" if active_only else ""
     rows = _run(
         f"SELECT DISTINCT [AMR_TYPE] FROM [AMR] {where} ORDER BY [AMR_TYPE]"
     )
-    return [str(r[0]).strip() for r in rows if r[0]]
+    return _sort_na_last([str(r[0]).strip() for r in rows if r[0]])
 
 
 def fetch_amr_subtypes(active_only: bool = True) -> list[str]:
@@ -114,7 +121,7 @@ def fetch_amr_subtypes(active_only: bool = True) -> list[str]:
     rows = _run(
         f"SELECT DISTINCT [AMR_SUBTYPE] FROM [AMR] {where} ORDER BY [AMR_SUBTYPE]"
     )
-    return [str(r[0]).strip() for r in rows if r[0]]
+    return _sort_na_last([str(r[0]).strip() for r in rows if r[0]])
 
 
 # ---------------------------------------------------------------------------

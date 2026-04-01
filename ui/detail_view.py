@@ -739,8 +739,13 @@ class DetailPanel(QWidget):
         for db_key, widget in self._field_widgets.items():
             raw  = self._report.get(db_key)
             text = "" if raw is None else str(raw)
-            if "Date" in db_key and " " in text:
-                text = text.split(" ")[0]
+            if "Date" in db_key:
+                if " " in text:
+                    text = text.split(" ")[0]
+                # Reformat YYYY-MM-DD → MM/DD/YYYY for display
+                parts = text.split("-")
+                if len(parts) == 3 and all(p.isdigit() for p in parts):
+                    text = f"{parts[1]}/{parts[2]}/{parts[0]}"
 
             if isinstance(widget, QTextEdit):
                 widget.setPlainText(text)
@@ -891,14 +896,8 @@ class DetailPanel(QWidget):
         else:
             self._set_editable(True)
 
-    def _on_save_clicked(self):
-        if QMessageBox.question(
-            self, "Confirm Save", "Save changes to this report?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        ) != QMessageBox.StandardButton.Yes:
-            return
-
+    def _collect_fields(self) -> dict:
+        """Gather every widget value into a DB-ready dict, converting date display format."""
         fields: dict = {}
         for db_key, widget in self._field_widgets.items():
             if isinstance(widget, QTextEdit):
@@ -908,7 +907,24 @@ class DetailPanel(QWidget):
             elif isinstance(widget, QComboBox):
                 fields[db_key] = widget.currentText().strip() or None
             else:
-                fields[db_key] = widget.text().strip() or None
+                val = widget.text().strip() or None
+                # Convert MM/DD/YYYY display format back to YYYY-MM-DD for DB
+                if val and "Date" in db_key:
+                    parts = val.split("/")
+                    if len(parts) == 3 and all(p.isdigit() for p in parts):
+                        val = f"{parts[2]}-{parts[0]}-{parts[1]}"
+                fields[db_key] = val
+        return fields
+
+    def _on_save_clicked(self):
+        if QMessageBox.question(
+            self, "Confirm Save", "Save changes to this report?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        fields = self._collect_fields()
 
         success = update_report(self._index, fields)
         if success:
@@ -956,7 +972,7 @@ class DetailPanel(QWidget):
             fr_appr_w.setChecked(True)
             if isinstance(date_appr_w, QLineEdit) and not date_appr_w.text().strip():
                 from datetime import date as _date
-                date_appr_w.setText(_date.today().strftime("%Y-%m-%d"))
+                date_appr_w.setText(_date.today().strftime("%m/%d/%Y"))
             if isinstance(date_cls_w, QLineEdit) and not date_cls_w.text().strip():
                 date_cls_w.setText(date_corrected)
         elif tcc_required:
@@ -975,16 +991,7 @@ class DetailPanel(QWidget):
         ) != QMessageBox.StandardButton.Yes:
             return
 
-        fields: dict = {}
-        for db_key, widget in self._field_widgets.items():
-            if isinstance(widget, QTextEdit):
-                fields[db_key] = widget.toPlainText() or None
-            elif isinstance(widget, QCheckBox):
-                fields[db_key] = "Checked" if widget.isChecked() else "Unchecked"
-            elif isinstance(widget, QComboBox):
-                fields[db_key] = widget.currentText().strip() or None
-            else:
-                fields[db_key] = widget.text().strip() or None
+        fields = self._collect_fields()
         fields["FR_Ready_For_Review"] = "Checked"
 
         if update_report(self._index, fields):
