@@ -33,7 +33,7 @@ fr_database_migration/
 ```
 
 ## Database Summary
-- **Primary table:** `Failure Report` — 2003 records, 70 columns
+- **Primary table:** `Failure Report` —  containing a continuous about of records
 - **Secondary table:** `ATTACHMENT` — stores file attachments (currently empty)
 - **Custom stored procedures:** `GET_FR_DATA` (SELECT * ORDER BY New ID), `REPLACE_ATTACHMENT_PATH`
 
@@ -55,21 +55,3 @@ fr_database_migration/
 
 **Meter_Type:** Revelo, S4X Gen 2, FOCUS AXe, MAXsys, FOCUS AX, S4X, S4X Gen 3, FOCUS Axei, FOCUS Axi, FOCUS AX POLY, FOCUS AL, S4e, Residential, FOCUS, AXEi, Load Control Switch, FOCUS AX EPS, Focus Axe 8W, DEV 2635, PCB Board, Prototype, NextGenMeter, AXe, FOCUS AXe Gen 2, FOCUS RXRe, E360, S4x RXR, NA
 > Note: Meter_Type list needs cleanup — NA/N/A/- are duplicates, NextGenMeter/NextGen/NexGen/NGM likely same product. Confirm with engineers before finalizing.
-
-## Planned Application Screens
-1. **Main Dashboard** — searchable/sortable table of all reports, filter by date, project, status, engineer
-2. **Report Detail / Edit View** — tabbed layout:
-   - Tab 1: Meter Info
-   - Tab 2: AMR Info
-   - Tab 3: Test & Failure
-   - Tab 4: Review & Approval
-   - Tab 5: Attachments
-3. **New Report Form** — same tabbed layout as detail view, blank for new entry
-
-## Current Status
-- [x] Phase 1 — Legacy DB backed up
-- [x] Phase 2 — DB restored to local SQL Server, visible in SSMS
-- [x] Phase 3 — Codebase reviewed and documented
-- [x] Phase 4 setup — Python environment, VS Code, GitHub configured
-- [x] Database inventory complete — tables, columns, stored procedures mapped
-- [ ] Phase 4 build — Application development in progress
