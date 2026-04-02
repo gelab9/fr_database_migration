@@ -55,3 +55,53 @@ fr_database_migration/
 
 **Meter_Type:** Revelo, S4X Gen 2, FOCUS AXe, MAXsys, FOCUS AX, S4X, S4X Gen 3, FOCUS Axei, FOCUS Axi, FOCUS AX POLY, FOCUS AL, S4e, Residential, FOCUS, AXEi, Load Control Switch, FOCUS AX EPS, Focus Axe 8W, DEV 2635, PCB Board, Prototype, NextGenMeter, AXe, FOCUS AXe Gen 2, FOCUS RXRe, E360, S4x RXR, NA
 > Note: Meter_Type list needs cleanup — NA/N/A/- are duplicates, NextGenMeter/NextGen/NexGen/NGM likely same product. Confirm with engineers before finalizing.
+
+# Next on the Agenda
+**Code Cleaning:**
+
+*Ignore, this is a personal question* Frank question: What is the difference between Matrix ID and Project Name/ID
+
+*Ignore for now* Get rid of Matrix ID, not used (check to make sure we don't need)
+
+*Ignore this is a personal task for now* Get a list of every single test in the lab - different ones for HQ, ANSI, and Landis + Gyr
+
+*Attachements is not fixed*
+
+Option in the 'attachments' area where 'open checked' in the original to needs to actually open up attachments from the application, I am not able to, let's fix this
+Checked and it is leading to the wrong folder where it is actually stored, it needs to line up with new HQA drive: HQA (\\uslafvs001038)(Z:)\TEST DATA\00-GE LAB IN PROCESS and find the attachments within that drive, not sure where it is leading to. The button also needs an outline for the 'Open Folder' button.
+
+Example of code used in another project to use a browse:
+# Python
+      browse_btn = QPushButton("Browse…")
+            browse_btn.setFixedWidth(72)
+            browse_btn.setFixedHeight(24)
+            browse_btn.setToolTip(
+                  "Open a file browser to locate the .xlsm workbook.\n"
+                  "Opens to: Z:\\TEST DATA\\00-GE LAB IN PROCESS"
+        )
+        browse_btn.clicked.connect(self._browse_workbook)
+        row.addWidget(browse_btn)
+        box.layout().addLayout(row)
+
+        self._working_dir_lbl = QLabel("Working directory: —")
+        self._working_dir_lbl.setStyleSheet("color: #555; font-size: 11px;")
+        box.layout().addWidget(self._working_dir_lbl)
+        return box
+
+    def _browse_workbook(self) -> None:
+        # Default to last used dir, then the network share, then home
+        last_dir = self._settings.value("last_dir", "")
+        if not last_dir or not Path(last_dir).exists():
+            last_dir = _DEFAULT_DIR if Path(_DEFAULT_DIR).exists() else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Test Workbook", last_dir,
+            "Excel Workbooks (*.xlsm *.xlsx);;All Files (*)"
+        )
+        if path:
+            self._wb_field.setText(path)
+            self._on_workbook_selected(path)
+
+
+*End of Attachments section*
+
+*FIGURE OUT INFORMATION ABOUT FR WITH FRANK, more information to be continued...*

@@ -262,10 +262,11 @@ class DashboardWindow(QMainWindow):
         self._detail_panel.report_saved.connect(self._on_report_saved)
         self._splitter.addWidget(self._detail_panel)
 
-        # Report table
+        # Report table — starts at 1-row height; drag splitter to expand
         self._table = self._build_table()
+        self._table.setMinimumHeight(55)
         self._splitter.addWidget(self._table)
-        self._splitter.setSizes([420, 360])
+        self._splitter.setSizes([680, 80])
 
         root.addWidget(self._splitter, stretch=1)
 
@@ -608,7 +609,7 @@ class DashboardWindow(QMainWindow):
         proxy_row = selected[0].row()
         new_id    = self._proxy.data(self._proxy.index(proxy_row, COL_NEW_ID))
         project   = self._proxy.data(self._proxy.index(proxy_row, KEYS.index("Project")))
-        label     = f"FR #{new_id}" + (f" — {project}" if project else "")
+        label     = f"FR{new_id}" + (f" — {project}" if project else "")
 
         if QMessageBox.question(
             self, "Delete Report",

@@ -136,9 +136,9 @@ def _can_edit_tcc(tcc_key: str) -> bool:
 # ---------------------------------------------------------------------------
 
 TEST_INFO_FIELDS = [
-    ("Project",             "Project"),
+    ("Project Name",        "Project"),
     ("Project Number",      "Project_Number"),
-    ("FW Ver",              "FW Ver"),
+    ("FW Version",          "FW Ver"),
     ("Test Matrix ID",      "Test_Matrix_ID"),
     ("Test",                "Test"),
     ("Test Type",           "Test_Type"),
@@ -200,7 +200,7 @@ METER_FIELDS = [
     ("Sub Type",        "Meter_SubType"),
     ("Sub Type II",     "Meter_SubTypeII"),
     ("DSP Rev",         "Meter_DSP_Rev"),
-    ("PCBA",            "Meter_PCBA"),
+    ("PCBA Number",     "Meter_PCBA"),
     ("PCBA Rev",        "Meter_PCBA_Rev"),
     ("Software",        "Meter_Software"),
     ("Software Rev",    "Meter_Software_Rev"),
@@ -221,7 +221,7 @@ AMR_FIELDS = [
     ("Sub Type II",     "AMR_SUBTypeII"),
     ("Sub Type III",    "AMR_SUBTypeIII"),
     ("Notes",           "AMR_Notes"),
-    ("PCBA",            "AMR_PCBA"),
+    ("PCBA Number",     "AMR_PCBA"),
     ("PCBA Rev",        "AMR_PCBA_Rev"),
     ("Software",        "AMR_Software"),
     ("Software Rev",    "AMR_Software_Rev"),
@@ -231,11 +231,11 @@ AMR_FIELDS = [
 
 # Header panel field rows
 _HDR_ROW1 = [
-    ("Project",    "Project"),
-    ("Proj #",     "Project_Number"),
-    ("EUT Type",   "EUT_TYPE"),
-    ("Matrix ID",  "Test_Matrix_ID"),
-    ("FW Ver",     "FW Ver"),
+    ("Project",         "Project"),
+    ("Project Number",  "Project_Number"),
+    ("EUT Type",        "EUT_TYPE"),
+    ("Matrix ID",       "Test_Matrix_ID"),
+    ("FW Version",      "FW Ver"),
 ]
 _HDR_ROW2 = [
     ("Test",        "Test"),
@@ -305,6 +305,7 @@ class DetailPanel(QWidget):
         self._report:  dict | None = None
         self._editing: bool        = False
         self._field_widgets: dict[str, QWidget] = {}
+        self._tcc_panel_widgets: dict[str, QWidget] = {}
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -367,9 +368,17 @@ class DetailPanel(QWidget):
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         cl.addWidget(sep)
 
+        # Right pane: TCC info panel (always visible) above tabs (compressed by default)
+        right_pane = QSplitter(Qt.Orientation.Vertical)
+        right_pane.setHandleWidth(3)
+        right_pane.setChildrenCollapsible(False)
+        right_pane.addWidget(self._build_tcc_panel())
+        right_pane.addWidget(self._build_tabs())
+        right_pane.setSizes([340, 80])
+
         body = QSplitter(Qt.Orientation.Horizontal)
         body.addWidget(self._build_approval_sidebar())
-        body.addWidget(self._build_tabs())
+        body.addWidget(right_pane)
         body.setSizes([230, 900])
         body.setHandleWidth(3)
         body.setChildrenCollapsible(False)
@@ -444,7 +453,7 @@ class DetailPanel(QWidget):
         layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(4)
 
-        def _field_pair(label: str, key: str, max_w: int = 140) -> QHBoxLayout:
+        def _field_pair(label: str, key: str, max_w: int = 220) -> QHBoxLayout:
             h = QHBoxLayout()
             h.setSpacing(4)
             lbl = QLabel(label + ":")
@@ -490,6 +499,122 @@ class DetailPanel(QWidget):
             r3.addLayout(h)
         r3.addStretch()
         layout.addLayout(r3)
+
+        return panel
+
+    # -- TCC info panel (always-visible mirrors) ---------------------------
+
+    def _build_tcc_panel(self) -> QFrame:
+        """Always-visible 4-column panel: Meter | Radio/AMR | Failure Desc | Notes.
+        Displays read-only mirrors of key fields so engineers can review all
+        critical information at once during TCC review without switching tabs.
+        """
+        panel = QFrame()
+        panel.setObjectName("report_header_panel")
+        panel.setFrameShape(QFrame.Shape.StyledPanel)
+        panel.setMinimumHeight(120)
+
+        outer = QHBoxLayout(panel)
+        outer.setContentsMargins(6, 4, 6, 4)
+        outer.setSpacing(0)
+
+        def _vsep() -> QFrame:
+            s = QFrame()
+            s.setFrameShape(QFrame.Shape.VLine)
+            s.setFrameShadow(QFrame.Shadow.Sunken)
+            return s
+
+        def _make_field_col(title: str, fields: list) -> QWidget:
+            w = QWidget()
+            vl = QVBoxLayout(w)
+            vl.setContentsMargins(8, 4, 8, 4)
+            vl.setSpacing(3)
+            hdr = QLabel(title)
+            hdr.setFont(QFont("", -1, QFont.Weight.Bold))
+            hdr.setStyleSheet("font-size: 8pt; color: #1a5276; padding-bottom: 2px;")
+            vl.addWidget(hdr)
+            for label, key in fields:
+                row_w = QWidget()
+                row_h = QHBoxLayout(row_w)
+                row_h.setContentsMargins(0, 0, 0, 0)
+                row_h.setSpacing(4)
+                lbl = QLabel(label + ":")
+                lbl.setStyleSheet("font-size: 8pt; color: #666;")
+                lbl.setFixedWidth(90)
+                lbl.setAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                val = QLabel("—")
+                val.setStyleSheet("font-size: 8pt;")
+                val.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+                )
+                self._tcc_panel_widgets[key] = val
+                row_h.addWidget(lbl)
+                row_h.addWidget(val)
+                vl.addWidget(row_w)
+            vl.addStretch()
+            return w
+
+        def _make_text_col(title: str, entries: list) -> QWidget:
+            w = QWidget()
+            vl = QVBoxLayout(w)
+            vl.setContentsMargins(8, 4, 8, 4)
+            vl.setSpacing(3)
+            hdr = QLabel(title)
+            hdr.setFont(QFont("", -1, QFont.Weight.Bold))
+            hdr.setStyleSheet("font-size: 8pt; color: #1a5276; padding-bottom: 2px;")
+            vl.addWidget(hdr)
+            for sub_label, key in entries:
+                if sub_label:
+                    sub_lbl = QLabel(sub_label + ":")
+                    sub_lbl.setStyleSheet("font-size: 8pt; color: #666;")
+                    vl.addWidget(sub_lbl)
+                te = QTextEdit()
+                te.setReadOnly(True)
+                te.setStyleSheet("font-size: 8pt;")
+                te.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+                )
+                self._tcc_panel_widgets[key] = te
+                vl.addWidget(te, stretch=1)
+            return w
+
+        # Column 1 — Meter
+        outer.addWidget(_make_field_col("Meter", [
+            ("Manufacturer", "Meter_Manufacturer"),
+            ("Meter",        "Meter"),
+            ("Type",         "Meter_Type"),
+            ("Sub Type",     "Meter_SubType"),
+            ("Serial Number", "Meter_Serial_Number"),
+            ("Form",         "Form"),
+            ("Base",         "Meter_Base"),
+        ]))
+        outer.addWidget(_vsep())
+
+        # Column 2 — Radio / AMR
+        outer.addWidget(_make_field_col("Radio / AMR", [
+            ("AMR",          "AMR"),
+            ("Rev",          "AMR Rev"),
+            ("Manufacturer", "AMR_Manufacturer"),
+            ("Type",         "AMR_Type"),
+            ("Sub Type",     "AMR_SUBType"),
+            ("Serial Number", "AMR_SN"),
+            ("IP / LAN",     "AMR_IP_LAN_ID"),
+        ]))
+        outer.addWidget(_vsep())
+
+        # Column 3 — Failure Description
+        outer.addWidget(_make_text_col("Failure Description", [
+            ("", "Failure Description"),
+        ]), stretch=2)
+        outer.addWidget(_vsep())
+
+        # Column 4 — Notes
+        outer.addWidget(_make_text_col("Notes", [
+            ("Meter Notes", "Meter_Notes"),
+            ("AMR Notes",   "AMR_Notes"),
+        ]), stretch=2)
 
         return panel
 
@@ -632,7 +757,7 @@ class DetailPanel(QWidget):
         layout.setSpacing(12)
 
         # Section 1: legacy UNC path
-        unc_lbl = QLabel("Legacy attachment path (VB/ZIP archive):")
+        unc_lbl = QLabel("Attachments:")
         unc_lbl.setFont(QFont("", -1, QFont.Weight.Bold))
         layout.addWidget(unc_lbl)
 
@@ -643,6 +768,7 @@ class DetailPanel(QWidget):
         unc_row.addWidget(self._attachments_field, stretch=1)
 
         self._open_folder_btn = QPushButton("Open Folder")
+        self._open_folder_btn.setObjectName("outline_btn")
         self._open_folder_btn.setFixedWidth(100)
         self._open_folder_btn.setEnabled(False)
         self._open_folder_btn.clicked.connect(self._on_open_unc_folder)
@@ -733,7 +859,7 @@ class DetailPanel(QWidget):
         new_id  = self._report.get("New ID",  "")
         project = self._report.get("Project", "")
         self._title_label.setText(
-            f"FR #{new_id}" + (f"  —  {project}" if project else "")
+            f"FR{new_id}" + (f"  —  {project}" if project else "")
         )
 
         for db_key, widget in self._field_widgets.items():
@@ -759,6 +885,15 @@ class DetailPanel(QWidget):
                     widget.setCurrentText(text)
             else:
                 widget.setText(text)
+
+        # TCC panel mirrors (read-only, always visible)
+        for db_key, widget in self._tcc_panel_widgets.items():
+            raw  = self._report.get(db_key)
+            text = "" if raw is None else str(raw).strip()
+            if isinstance(widget, QTextEdit):
+                widget.setPlainText(text)
+            else:
+                widget.setText(text if text else "—")
 
         # Attachments tab
         unc = self._report.get("Attachments")
@@ -797,11 +932,31 @@ class DetailPanel(QWidget):
         item = self._attachment_list.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
+    # Base path on the HQA network drive where attachments are stored
+    _HQA_BASE = r"\\uslafvs001038\HQA\TEST DATA\00-GE LAB IN PROCESS"
+
+    def _remap_to_hqa(self, path: str) -> str:
+        """Remap legacy drive-letter paths (Z:\...) to the current HQA UNC path."""
+        import re
+        # Replace Z:\ (case-insensitive) with the HQA UNC root
+        remapped = re.sub(r"(?i)^Z:\\", r"\\\\uslafvs001038\\HQA\\", path)
+        # Also remap any old server UNC prefix that is not the current server
+        remapped = re.sub(
+            r"(?i)^\\\\[^\\]+\\HQA\\",
+            r"\\\\uslafvs001038\\HQA\\",
+            remapped,
+        )
+        return remapped
+
     def _on_open_unc_folder(self):
-        path = self._attachments_field.text().strip()
-        if not path:
-            return
+        raw = self._attachments_field.text().strip()
+        path = self._remap_to_hqa(raw) if raw else ""
         folder = os.path.dirname(path) if os.path.splitext(path)[1] else path
+
+        # If the remapped path doesn't exist, fall back to the HQA base folder
+        if not os.path.exists(folder):
+            folder = self._HQA_BASE
+
         try:
             os.startfile(folder)
         except Exception as e:
@@ -1010,7 +1165,7 @@ class DetailPanel(QWidget):
     def _on_delete_clicked(self):
         new_id  = self._report.get("New ID",  "?")
         project = self._report.get("Project", "")
-        label   = f"FR #{new_id}" + (f" — {project}" if project else "")
+        label   = f"FR{new_id}" + (f" — {project}" if project else "")
 
         if QMessageBox.question(
             self, "Delete Report",
@@ -1071,7 +1226,7 @@ class DetailPanel(QWidget):
     def _build_pdf_html(self) -> str:
         new_id  = self._report.get("New ID",  "")
         project = self._report.get("Project", "")
-        title   = f"Failure Report #{new_id}" + (f" — {project}" if project else "")
+        title   = f"Failure Report {new_id}" + (f" — {project}" if project else "")
 
         all_sections = [
             ("Test Info", _HDR_ROW1 + _HDR_ROW2),

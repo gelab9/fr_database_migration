@@ -54,6 +54,7 @@ from db.lookup_queries import (
     fetch_testers,
 )
 from db.queries import create_report, fetch_distinct_column_values, get_next_new_id
+from ui.matrix_import import MatrixImportDialog
 from ui.detail_view import (
     AMR_FIELDS,
     ENGINEERING_FIELDS,
@@ -78,6 +79,29 @@ _FALLBACK_TEST_TYPES = [
     "Accuracy", "Mechanical", "Safety", "Custom", "Past Tests",
 ]
 
+# AMR subtype values that must always appear in the dropdown regardless of
+# what is currently in the METER_SPECS DB (pending SQL migration run).
+_REQUIRED_AMR_SUBTYPES = ["Mesh", "Mesh IP", "Series 4", "Series 5", "Series 6"]
+
+
+def _load_combined_meter_subtypes() -> list[str]:
+    """Combined Meter Type + SubType options — used for Sub Type, Sub Type II."""
+    types    = fetch_meter_types()
+    subtypes = fetch_meter_subtypes()
+    combined = sorted(set(types + subtypes), key=str.casefold)
+    return [""] + combined
+
+
+def _load_combined_amr_subtypes() -> list[str]:
+    """Combined AMR Type + SubType options — used for Sub Type, Sub Type II, Sub Type III."""
+    types    = fetch_amr_types()
+    subtypes = fetch_amr_subtypes()
+    combined = sorted(
+        set(types + subtypes + _REQUIRED_AMR_SUBTYPES),
+        key=str.casefold,
+    )
+    return [""] + combined
+
 # DB keys whose combo items are loaded from METER_SPECS at form-open time.
 # Value is a callable () -> list[str].  An empty string is prepended so the
 # field can be left blank, matching VB behaviour.
@@ -95,13 +119,16 @@ _DB_COMBO_LOADERS: dict[str, callable] = {
     "Meter":                 lambda: [""] + fetch_meter_models(),
     "Meter_Manufacturer":    lambda: [""] + fetch_meter_manufacturers(),
     "Meter_Type":            lambda: [""] + fetch_meter_types(),
-    "Meter_SubType":         lambda: [""] + fetch_meter_subtypes(),
+    "Meter_SubType":         _load_combined_meter_subtypes,
+    "Meter_SubTypeII":       _load_combined_meter_subtypes,
     "Form":                  lambda: [""] + fetch_meter_forms(),
     "Meter_Base":            lambda: [""] + fetch_meter_bases(),
     "AMR":                   lambda: [""] + fetch_amr_models(),
     "AMR_Manufacturer":      lambda: [""] + fetch_amr_manufacturers(),
     "AMR_Type":              lambda: [""] + fetch_amr_types(),
-    "AMR_SUBType":           lambda: [""] + fetch_amr_subtypes(),
+    "AMR_SUBType":           _load_combined_amr_subtypes,
+    "AMR_SUBTypeII":         _load_combined_amr_subtypes,
+    "AMR_SUBTypeIII":        _load_combined_amr_subtypes,
 }
 
 # DB keys that render as a NullableDateEdit
@@ -226,6 +253,14 @@ class NewReportDialog(QDialog):
         new_id_label.setStyleSheet("color: #555; font-size: 10pt;")
         header_row.addWidget(new_id_label)
 
+        import_btn = QPushButton("Import from Matrix")
+        import_btn.setObjectName("outline_btn")
+        import_btn.setToolTip(
+            "Pre-fill this form from a Matrix spreadsheet on the HQA drive"
+        )
+        import_btn.clicked.connect(self._on_import_matrix)
+        header_row.addWidget(import_btn)
+
         self._save_btn = QPushButton("Save")
         self._save_btn.setObjectName("save_btn")
         self._save_btn.setFixedWidth(70)
@@ -256,6 +291,7 @@ class NewReportDialog(QDialog):
 
         tabs.addTab(self._build_form_tab(METER_FIELDS),        "Meter Info")
         tabs.addTab(self._build_form_tab(AMR_FIELDS),          "AMR Info")
+        tabs.addTab(QWidget(),                                 "WIFI")
         tabs.addTab(self._build_form_tab(TEST_INFO_FIELDS),    "Test Info")
         tabs.addTab(self._build_form_tab(FAILURE_FIELDS),      "Failure")
         tabs.addTab(self._build_form_tab(ENGINEERING_FIELDS),  "Engineering")
@@ -322,6 +358,48 @@ class NewReportDialog(QDialog):
         layout.addWidget(note)
         layout.addStretch()
         return container
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Matrix import
+    # ------------------------------------------------------------------
+
+    def _on_import_matrix(self):
+        """Open the Matrix import dialog and pre-fill form fields."""
+        dlg = MatrixImportDialog(self)
+        if dlg.exec() != MatrixImportDialog.DialogCode.Accepted:
+            return
+        data = dlg.get_mapped_fields()
+        self._prefill_from_dict(data)
+        filled = len(data)
+        QMessageBox.information(
+            self,
+            "Import Complete",
+            f"{filled} field(s) pre-filled from the Matrix spreadsheet.\n\n"
+            "Review each tab and adjust any values before saving.",
+        )
+
+    def _prefill_from_dict(self, data: dict):
+        """Set form field values from a dict of FR db_key → str value."""
+        for db_key, value in data.items():
+            widget = self._field_widgets.get(db_key)
+            if widget is None:
+                continue
+            if isinstance(widget, QComboBox):
+                idx = widget.findText(value, Qt.MatchFlag.MatchFixedString)
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+                else:
+                    widget.setCurrentText(value)
+            elif isinstance(widget, NullableDateEdit):
+                widget.set_value(value)
+            elif isinstance(widget, QTextEdit):
+                widget.setPlainText(value)
+            else:
+                widget.setText(value)
 
     # ------------------------------------------------------------------
     # Save
