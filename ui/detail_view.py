@@ -312,8 +312,22 @@ class DetailPanel(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
+    @property
+    def is_editing(self) -> bool:
+        """True while an edit session is active (Save/Cancel not yet clicked)."""
+        return self._editing
+
+    @property
+    def current_index(self) -> int | None:
+        """The [Index] PK of the currently displayed report, or None."""
+        return self._index
+
     def load_report(self, index: int) -> bool:
         """Fetch and display a report by its [Index] PK. Returns True on success."""
+        # If already editing this exact report, don't interrupt the session.
+        # This prevents dashboard table-refresh signals from wiping unsaved edits.
+        if self._editing and index == self._index:
+            return True
         report = fetch_report_by_id(index)
         if report is None:
             return False
@@ -1083,12 +1097,11 @@ class DetailPanel(QWidget):
 
         success = update_report(self._index, fields)
         if success:
-            # Reload from DB so display reflects server-side values
+            # Refresh cached report data from DB without exiting edit mode.
+            # The user can continue editing; Cancel will revert to this saved state.
             refreshed = fetch_report_by_id(self._index)
             if refreshed:
                 self._report = refreshed
-            self._set_editable(False)
-            self._populate()
             self.report_saved.emit()
         else:
             QMessageBox.critical(self, "Save Failed", "Save failed — please try again.")

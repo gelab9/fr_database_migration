@@ -166,7 +166,7 @@ class NullableDateEdit(QWidget):
         self._date_edit.setDisplayFormat("MM/dd/yyyy")
         self._date_edit.setMinimumDate(self._NULL_DATE)
         self._date_edit.setSpecialValueText("(none)")
-        self._date_edit.setDate(QDate.currentDate())   # default to today
+        self._date_edit.setDate(self._NULL_DATE)   # default to blank
         layout.addWidget(self._date_edit, stretch=1)
 
         self._clear_btn = QPushButton("✕")
@@ -446,6 +446,17 @@ class NewReportDialog(QDialog):
         return fields
 
     def _on_save_clicked(self):
+        reply = QMessageBox.question(
+            self,
+            "Create Report",
+            "Are you sure you want to create this report?\n\n"
+            "This will permanently add the report to the database.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
         fields = self._collect_fields()
 
         new_index = create_report(fields)

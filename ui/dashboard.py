@@ -468,6 +468,8 @@ class DashboardWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _nav_jump(self, proxy_row: int):
+        if self._detail_panel.is_editing:
+            return
         total = self._proxy.rowCount()
         if total == 0:
             return
@@ -503,9 +505,21 @@ class DashboardWindow(QMainWindow):
 
         if has_sel:
             proxy_row    = selected[0].row()
-            self._nav_row = proxy_row
             source_index = self._proxy.mapToSource(self._proxy.index(proxy_row, 0))
             db_index     = self._model.index_for_row(source_index.row())
+
+            # Block navigation to a different report while an edit is in progress.
+            if (self._detail_panel.is_editing
+                    and db_index != self._detail_panel.current_index):
+                # Silently revert the table selection back to the report being edited.
+                sm = self._table.selectionModel()
+                sm.blockSignals(True)
+                if 0 <= self._nav_row < self._proxy.rowCount():
+                    self._table.selectRow(self._nav_row)
+                sm.blockSignals(False)
+                return
+
+            self._nav_row = proxy_row
             if db_index is not None:
                 self._detail_panel.load_report(db_index)
         else:
